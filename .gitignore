@@ -1,0 +1,35 @@
+# Build directories
+build/
+build-*/
+cmake-build-*/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+
+# Qt Creator local files
+*.user
+*.user.*
+
+# Build outputs
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.exe
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Local project guidance and planning
+AGENTS.md
+FLOATING_NOTES_FEATURES.md
+IMPLEMENTATION_PLAN.md
