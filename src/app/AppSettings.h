@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QPoint>
+#include <QSize>
 #include <QString>
 
 class AppSettings
@@ -38,6 +40,24 @@ public:
 
     NoteFont noteFont() const;
     void setNoteFont(NoteFont noteFont);
+
+    int noteBodyFontSize() const;
+    void setNoteBodyFontSize(int pointSize);
+
+    bool rememberNoteWindowSize() const;
+    void setRememberNoteWindowSize(bool enabled);
+    QSize noteWindowSize(int noteId) const;
+    void setNoteWindowSize(int noteId, const QSize &size);
+
+    bool rememberNoteWindowPosition() const;
+    void setRememberNoteWindowPosition(bool enabled);
+    bool hasNoteWindowPosition(int noteId) const;
+    QPoint noteWindowPosition(int noteId) const;
+    void setNoteWindowPosition(int noteId, const QPoint &position);
+    void clearNoteWindowPositions();
+
+    int noteBodyCursorPosition(int noteId) const;
+    void setNoteBodyCursorPosition(int noteId, int position);
 
     bool launchAtStartup() const;
     void setLaunchAtStartup(bool enabled);

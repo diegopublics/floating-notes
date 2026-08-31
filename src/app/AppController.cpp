@@ -3,6 +3,7 @@
 #include "ui/AllNotesWindow.h"
 #include "ui/AppTheme.h"
 #include "ui/EdgeDockWindow.h"
+#include "ui/HelpDialog.h"
 #include "ui/SettingsDialog.h"
 
 #include <QAction>
@@ -24,7 +25,9 @@ AppController::AppController(QObject *parent)
 AppController::~AppController()
 {
     qDeleteAll(m_docks);
+    qDeleteAll(m_noteEditorWindows);
     delete m_allNotesWindow;
+    delete m_helpDialog;
     delete m_settingsDialog;
     delete m_trayMenu;
 }
@@ -69,6 +72,12 @@ void AppController::buildTray()
     });
     m_trayMenu->addAction("Archive Current", this, [this] {
         archiveCurrentNote();
+    });
+    m_trayMenu->addAction("Reset Note Window Positions", this, [this] {
+        resetNoteWindowPositions();
+    });
+    m_trayMenu->addAction("Help", this, [this] {
+        showHelp();
     });
     m_trayMenu->addAction("Settings", this, [this] {
         showSettings();
@@ -115,6 +124,9 @@ void AppController::rebuildDocks()
                                     [this] { showAllNotes(); },
                                     [this] { showSettings(); },
                                     [this] { hideDocks(); });
+    dock->setOpenNoteCallback([this](int noteId) {
+        openNote(noteId);
+    });
     m_docks.append(dock);
     connect(screen, &QScreen::geometryChanged, dock, [dock] {
         dock->applySettings();
@@ -127,6 +139,9 @@ void AppController::applySettings()
     qApp->setStyleSheet(AppTheme::applicationStyleSheet(m_settings.theme()));
     for (EdgeDockWindow *dock : m_docks) {
         dock->applySettings();
+    }
+    for (EdgeDockWindow *editor : m_noteEditorWindows) {
+        editor->applySettings();
     }
 }
 
@@ -143,8 +158,67 @@ void AppController::createNote()
 
 void AppController::archiveCurrentNote()
 {
-    if (!m_docks.isEmpty()) {
-        m_docks.first()->archiveSelectedNote();
+    for (auto editor = m_noteEditorWindows.crbegin(); editor != m_noteEditorWindows.crend(); ++editor) {
+        if ((*editor)->isVisible()) {
+            (*editor)->archiveSelectedNote();
+            break;
+        }
+    }
+}
+
+void AppController::openNote(int noteId)
+{
+    for (EdgeDockWindow *editor : m_noteEditorWindows) {
+        if (editor->isVisible() && editor->isEditingNote(noteId)) {
+            editor->raise();
+            editor->activateWindow();
+            return;
+        }
+    }
+
+    EdgeDockWindow *editor = nullptr;
+    for (EdgeDockWindow *candidate : m_noteEditorWindows) {
+        if (!candidate->isVisible()) {
+            editor = candidate;
+            break;
+        }
+    }
+
+    if (editor == nullptr) {
+        QScreen *screen = QGuiApplication::primaryScreen();
+        if (screen == nullptr) {
+            return;
+        }
+        editor = new EdgeDockWindow(&m_repository,
+                                    &m_settings,
+                                    screen,
+                                    [this] { showAllNotes(); },
+                                    [this] { showSettings(); },
+                                    {});
+        editor->setEditorOnly(true);
+        editor->setNotesChangedCallback([this] {
+            refreshAllDocks();
+        });
+        m_noteEditorWindows.append(editor);
+    }
+
+    editor->openNote(noteId);
+    const auto visibleEditor = std::find_if(m_noteEditorWindows.crbegin(), m_noteEditorWindows.crend(), [editor](EdgeDockWindow *candidate) {
+        return candidate != editor && candidate->isVisible();
+    });
+    if (visibleEditor != m_noteEditorWindows.crend()) {
+        editor->moveNoteWindowTo((*visibleEditor)->pos() + QPoint(32, 32));
+    }
+    editor->show();
+    editor->raise();
+    editor->activateWindow();
+}
+
+void AppController::resetNoteWindowPositions()
+{
+    m_settings.clearNoteWindowPositions();
+    for (EdgeDockWindow *editor : m_noteEditorWindows) {
+        editor->resetNoteWindowPosition();
     }
 }
 
@@ -160,6 +234,17 @@ void AppController::showAllNotes()
     m_allNotesWindow->show();
     m_allNotesWindow->raise();
     m_allNotesWindow->activateWindow();
+}
+
+void AppController::showHelp()
+{
+    if (m_helpDialog == nullptr) {
+        m_helpDialog = new HelpDialog;
+    }
+
+    m_helpDialog->show();
+    m_helpDialog->raise();
+    m_helpDialog->activateWindow();
 }
 
 void AppController::showSettings()
@@ -195,6 +280,9 @@ void AppController::exitApplication()
 {
     for (EdgeDockWindow *dock : m_docks) {
         dock->saveCurrentNoteNow();
+    }
+    for (EdgeDockWindow *editor : m_noteEditorWindows) {
+        editor->saveCurrentNoteNow();
     }
     if (m_allNotesWindow != nullptr) {
         m_allNotesWindow->saveCurrentNoteNow();

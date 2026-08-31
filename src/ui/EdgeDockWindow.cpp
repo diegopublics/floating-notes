@@ -7,7 +7,7 @@
 #include <QCursor>
 #include <QEasingCurve>
 #include <QFontDatabase>
-#include <QGraphicsDropShadowEffect>
+#include <QFontMetricsF>
 #include <QGuiApplication>
 #include <QKeyEvent>
 #include <QLabel>
@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <utility>
 
 namespace {
@@ -34,15 +35,19 @@ constexpr int TabHeight = 122;
 constexpr int TabLap = 54;
 constexpr int TabPitch = 52;
 constexpr qreal TabLeanDegrees = 3.0;
-constexpr int EditorWidth = 460;
-constexpr int EditorHeight = 380;
+constexpr int DefaultEditorWidth = 460;
+constexpr int DefaultEditorHeight = 380;
+constexpr int MinimumEditorWidth = 300;
+constexpr int MinimumEditorHeight = 220;
 constexpr int EditorGutterWidth = 30;
+constexpr int EditorShadowMargin = 12;
 constexpr int PlusButtonSize = 28;
 constexpr int CollapseDelayMs = 180;
 constexpr int SaveDelayMs = 250;
 constexpr int UndoDelayMs = 7000;
 constexpr int MaxDeckButtons = 8;
 constexpr int MaxPillDashes = 14;
+constexpr int MaxFanTitleCharacters = 12;
 
 const std::array<QString, 8> AvailableColors = {
     QStringLiteral("#fce795"), QStringLiteral("#fbcfa6"),
@@ -109,6 +114,15 @@ QFont noteFont(AppSettings::NoteFont profile, int pointSize, QFont::Weight weigh
     return font;
 }
 
+QString fanTitle(const QString &title)
+{
+    const QString simplified = title.simplified();
+    if (simplified.size() <= MaxFanTitleCharacters) {
+        return simplified;
+    }
+    return simplified.left(MaxFanTitleCharacters) + QStringLiteral("...");
+}
+
 void drawSoftShadow(QPainter &painter, const QPainterPath &path, qreal horizontalOffset, qreal verticalOffset)
 {
     painter.setPen(Qt::NoPen);
@@ -120,6 +134,15 @@ void drawSoftShadow(QPainter &painter, const QPainterPath &path, qreal horizonta
     }
 }
 
+void drawAllSideShadow(QPainter &painter, const QPainterPath &path)
+{
+    painter.setBrush(Qt::NoBrush);
+    for (int layer = EditorShadowMargin; layer > 0; --layer) {
+        painter.setPen(QPen(QColor(18, 12, 14, 2 + (EditorShadowMargin - layer) * 2), layer * 2));
+        painter.drawPath(path);
+    }
+}
+
 class StickyTabButton final : public QPushButton
 {
 public:
@@ -128,10 +151,6 @@ public:
         setFlat(true);
         setCursor(Qt::PointingHandCursor);
         setFocusPolicy(Qt::StrongFocus);
-        m_shadow = new QGraphicsDropShadowEffect(this);
-        m_shadow->setBlurRadius(8.0);
-        m_shadow->setColor(QColor(15, 10, 12, 120));
-        setGraphicsEffect(m_shadow);
     }
 
     void setNote(const Note &note, AppSettings::Edge edge, AppSettings::NoteFont fontProfile, int visibleStrip)
@@ -139,8 +158,8 @@ public:
         m_note = note;
         m_edge = edge;
         m_fontProfile = fontProfile;
+        m_displayTitle = fanTitle(note.title).toUpper();
         m_visibleStrip = visibleStrip;
-        m_shadow->setOffset(edge == AppSettings::Edge::Right ? -3.0 : 3.0, 3.0);
         update();
     }
 
@@ -198,7 +217,7 @@ protected:
         font.setLetterSpacing(QFont::AbsoluteSpacing, 0.1);
         painter.setFont(font);
         painter.setPen(inkColor(paper.name()));
-        painter.drawText(QRect(-strip / 2 + 5, -TabWidth / 2, strip - 10, TabWidth), Qt::AlignCenter, m_note.title.simplified().toUpper());
+        painter.drawText(QRect(-strip / 2 + 5, -TabWidth / 2, strip - 10, TabWidth), Qt::AlignCenter, m_displayTitle);
         painter.restore();
     }
 
@@ -206,8 +225,8 @@ private:
     Note m_note;
     AppSettings::Edge m_edge = AppSettings::Edge::Right;
     AppSettings::NoteFont m_fontProfile = AppSettings::NoteFont::Playful;
-    QGraphicsDropShadowEffect *m_shadow = nullptr;
     int m_visibleStrip = TabPitch;
+    QString m_displayTitle;
 };
 }
 
@@ -221,6 +240,7 @@ EdgeDockWindow::EdgeDockWindow(NoteRepository *repository, AppSettings *settings
     setWindowTitle(QStringLiteral("Floating Notes"));
     setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_TranslucentBackground);
+    m_noteWindowContentSize = QSize(DefaultEditorWidth, DefaultEditorHeight);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
 
@@ -236,12 +256,20 @@ EdgeDockWindow::EdgeDockWindow(NoteRepository *repository, AppSettings *settings
     });
     m_saveTimer = new QTimer(this);
     m_saveTimer->setSingleShot(true); m_saveTimer->setInterval(SaveDelayMs);
-    connect(m_saveTimer, &QTimer::timeout, this, &EdgeDockWindow::saveCurrentNote);
+    connect(m_saveTimer, &QTimer::timeout, this, [this] {
+        saveCurrentNote();
+        if (m_notesChangedCallback) {
+            m_notesChangedCallback();
+        }
+    });
     m_deleteUndoTimer = new QTimer(this);
     m_deleteUndoTimer->setSingleShot(true); m_deleteUndoTimer->setInterval(UndoDelayMs);
     connect(m_deleteUndoTimer, &QTimer::timeout, this, &EdgeDockWindow::finalizePendingDelete);
     connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *now) {
         if (m_expanded && !m_keepOpen && (now == nullptr || (now != this && !isAncestorOf(now))) && !geometry().contains(QCursor::pos())) {
+            if (m_editorOnly && now != nullptr && dynamic_cast<EdgeDockWindow *>(now->window()) != nullptr) {
+                return;
+            }
             saveCurrentNote(); scheduleCollapse();
         }
     });
@@ -279,6 +307,8 @@ void EdgeDockWindow::buildContent()
     m_pinButton->setToolTip(QStringLiteral("Keep this note open"));
     connect(m_pinButton, &QPushButton::toggled, this, [this](bool pinned) {
         m_keepOpen = pinned;
+        m_pinButton->setText(pinned ? QStringLiteral("Unpin") : QStringLiteral("Pin"));
+        m_pinButton->setToolTip(pinned ? QStringLiteral("Allow this note to close automatically") : QStringLiteral("Keep this note open"));
         if (pinned) {
             m_collapseTimer->stop();
         }
@@ -292,6 +322,11 @@ void EdgeDockWindow::buildContent()
     m_tagsEdit = new QLineEdit(m_editorPanel); m_tagsEdit->hide(); connect(m_tagsEdit, &QLineEdit::textChanged, this, &EdgeDockWindow::scheduleSave);
     m_bodyEdit = new QPlainTextEdit(m_editorPanel); m_bodyEdit->setPlaceholderText(QStringLiteral("Write a note...")); m_bodyEdit->setTabChangesFocus(true);
     connect(m_bodyEdit, &QPlainTextEdit::textChanged, this, &EdgeDockWindow::scheduleSave); layout->addWidget(m_bodyEdit, 1);
+    connect(m_bodyEdit, &QPlainTextEdit::cursorPositionChanged, this, [this] {
+        if (!m_loadingEditor && m_currentNoteIndex >= 0 && m_currentNoteIndex < m_notes.size()) {
+            m_bodyCursorPositions.insert(m_notes.at(m_currentNoteIndex).id, m_bodyEdit->textCursor().position());
+        }
+    });
     auto *footer = new QHBoxLayout; footer->setContentsMargins(0, 0, 0, 0); footer->setSpacing(10);
     for (const QString &color : AvailableColors) {
         auto *button = new QPushButton(m_editorPanel); button->setFixedSize(18, 18); button->setProperty("noteColor", color);
@@ -310,13 +345,13 @@ void EdgeDockWindow::applySettings()
     m_geometryAnimation->setDuration(m_settings->animationDurationMs());
     m_titleEdit->setFont(noteFont(m_settings->noteFont(), 13, QFont::DemiBold));
     m_tagsEdit->setFont(noteFont(m_settings->noteFont(), 9));
-    m_bodyEdit->setFont(noteFont(m_settings->noteFont(), 14));
+    m_bodyEdit->setFont(noteFont(m_settings->noteFont(), m_settings->noteBodyFontSize()));
     updateNoteButtons(); layoutDeck(); positionNearScreenEdge();
 }
 
 void EdgeDockWindow::changeEvent(QEvent *event)
 {
-    if (event->type() == QEvent::WindowDeactivate && m_expanded && !m_keepOpen && !geometry().contains(QCursor::pos())) { saveCurrentNote(); scheduleCollapse(); }
+    if (event->type() == QEvent::WindowDeactivate && m_expanded && !m_editorOnly && !m_keepOpen && !geometry().contains(QCursor::pos())) { saveCurrentNote(); scheduleCollapse(); }
     QWidget::changeEvent(event);
 }
 
@@ -333,18 +368,149 @@ void EdgeDockWindow::refreshNotes()
     updateEditorFromCurrentNote(); updateNoteButtons(); layoutDeck(); positionNearScreenEdge();
 }
 
+void EdgeDockWindow::setEditorOnly(bool editorOnly)
+{
+    m_editorOnly = editorOnly;
+}
+
+void EdgeDockWindow::setOpenNoteCallback(std::function<void(int)> callback)
+{
+    m_openNoteCallback = std::move(callback);
+}
+
+void EdgeDockWindow::setNotesChangedCallback(std::function<void()> callback)
+{
+    m_notesChangedCallback = std::move(callback);
+}
+
+void EdgeDockWindow::openNote(int noteId)
+{
+    refreshNotes();
+    const auto noteIt = std::find_if(m_notes.cbegin(), m_notes.cend(), [noteId](const Note &note) {
+        return note.id == noteId;
+    });
+    if (noteIt == m_notes.cend()) {
+        return;
+    }
+
+    m_currentNoteIndex = static_cast<int>(std::distance(m_notes.cbegin(), noteIt));
+    setEditorVisible(true);
+    setExpanded(true);
+    updateEditorFromCurrentNote();
+    updateColorButtons();
+    m_bodyEdit->setFocus(Qt::MouseFocusReason);
+}
+
+bool EdgeDockWindow::isEditingNote(int noteId) const
+{
+    return m_editorVisible
+        && m_currentNoteIndex >= 0
+        && m_currentNoteIndex < m_notes.size()
+        && m_notes.at(m_currentNoteIndex).id == noteId;
+}
+
+void EdgeDockWindow::moveNoteWindowTo(const QPoint &position)
+{
+    if (!m_editorOnly || !m_editorVisible) {
+        return;
+    }
+
+    m_geometryAnimation->stop();
+    m_noteWindowPosition = position;
+    m_hasNoteWindowPosition = true;
+    setGeometry(QRect(m_noteWindowPosition, noteWindowSize()));
+    rememberNoteWindowGeometry();
+}
+
+void EdgeDockWindow::resetNoteWindowPosition()
+{
+    if (!m_editorOnly || !m_editorVisible) {
+        return;
+    }
+
+    m_geometryAnimation->stop();
+    m_noteWindowPosition = defaultNoteWindowPosition(noteWindowSize());
+    m_hasNoteWindowPosition = true;
+    setGeometry(QRect(m_noteWindowPosition, noteWindowSize()));
+}
+
 void EdgeDockWindow::enterEvent(QEnterEvent *event) { m_collapseTimer->stop(); setExpanded(true); QWidget::enterEvent(event); }
 void EdgeDockWindow::keyPressEvent(QKeyEvent *event) { if (event->key() == Qt::Key_Escape) { setExpanded(false); return; } QWidget::keyPressEvent(event); }
 void EdgeDockWindow::leaveEvent(QEvent *event)
 {
     QWidget *focus = QApplication::focusWidget();
-    if (!m_keepOpen && (focus == nullptr || (focus != this && !isAncestorOf(focus)))) scheduleCollapse();
+    if (!m_editorOnly && !m_keepOpen && (focus == nullptr || (focus != this && !isAncestorOf(focus)))) scheduleCollapse();
     QWidget::leaveEvent(event);
+}
+void EdgeDockWindow::mouseMoveEvent(QMouseEvent *event)
+{
+    if (m_resizingNoteWindow) {
+        const QPoint delta = event->globalPosition().toPoint() - m_noteWindowResizeStart;
+        const bool onRight = m_settings->preferredEdge() == AppSettings::Edge::Right;
+        const int minimumWidth = MinimumEditorWidth + EditorGutterWidth + 2 * EditorShadowMargin;
+        const int width = std::max(minimumWidth, m_noteWindowResizeStartSize.width() + (onRight ? -delta.x() : delta.x()));
+        const int height = std::max(MinimumEditorHeight + 2 * EditorShadowMargin, m_noteWindowResizeStartSize.height() + delta.y());
+        const int x = onRight ? m_noteWindowResizeStartPosition.x() + m_noteWindowResizeStartSize.width() - width : m_noteWindowResizeStartPosition.x();
+        setGeometry(x, m_noteWindowResizeStartPosition.y(), width, height);
+        m_noteWindowPosition = pos();
+        m_hasNoteWindowPosition = true;
+        event->accept();
+        return;
+    }
+    if (m_draggingNoteWindow) {
+        move(event->globalPosition().toPoint() - m_noteWindowDragOffset);
+        m_noteWindowPosition = pos();
+        m_hasNoteWindowPosition = true;
+        event->accept();
+        return;
+    }
+    QWidget::mouseMoveEvent(event);
 }
 void EdgeDockWindow::mousePressEvent(QMouseEvent *event)
 {
+    if (event->button() == Qt::LeftButton && isNoteWindowResizeHandle(event->position().toPoint())) {
+        m_geometryAnimation->stop();
+        m_resizingNoteWindow = true;
+        m_noteWindowResizeStart = event->globalPosition().toPoint();
+        m_noteWindowResizeStartSize = size();
+        m_noteWindowResizeStartPosition = pos();
+        m_noteWindowPosition = pos();
+        event->accept();
+        return;
+    }
+    if (event->button() == Qt::LeftButton && isNoteWindowDragHandle(event->position().toPoint())) {
+        m_geometryAnimation->stop();
+        m_draggingNoteWindow = true;
+        m_noteWindowDragOffset = event->globalPosition().toPoint() - pos();
+        event->accept();
+        return;
+    }
     if (event->button() == Qt::LeftButton) { setExpanded(true); event->accept(); return; }
     QWidget::mousePressEvent(event);
+}
+void EdgeDockWindow::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton && m_resizingNoteWindow) {
+        m_resizingNoteWindow = false;
+        rememberNoteWindowGeometry();
+        event->accept();
+        return;
+    }
+    if (event->button() == Qt::LeftButton && m_draggingNoteWindow) {
+        m_draggingNoteWindow = false;
+        rememberNoteWindowGeometry();
+        event->accept();
+        return;
+    }
+    QWidget::mouseReleaseEvent(event);
+}
+void EdgeDockWindow::moveEvent(QMoveEvent *event)
+{
+    if (m_editorVisible && m_geometryAnimation->state() != QAbstractAnimation::Running) {
+        m_noteWindowPosition = pos();
+        m_hasNoteWindowPosition = true;
+    }
+    QWidget::moveEvent(event);
 }
 
 void EdgeDockWindow::paintEvent(QPaintEvent *)
@@ -364,7 +530,9 @@ void EdgeDockWindow::paintEvent(QPaintEvent *)
         const int lineX = m_settings->preferredEdge() == AppSettings::Edge::Right ? width() - 4 : 3; painter.drawLine(lineX, 5, lineX, height() - 5); return;
     }
     const Note &note = m_notes.at(m_currentNoteIndex); const QString paperName = paperColor(note.color); const QColor paper(paperName); const QColor dash(dashColorForPaper(paperName)); const bool onRight = m_settings->preferredEdge() == AppSettings::Edge::Right;
-    const QRectF sheet = onRight ? QRectF(EditorGutterWidth, 0, width() - EditorGutterWidth, height() - 1) : QRectF(0, 0, width() - EditorGutterWidth, height() - 1);
+    const QRectF sheet = onRight
+        ? QRectF(EditorShadowMargin + EditorGutterWidth, EditorShadowMargin, width() - EditorGutterWidth - 2 * EditorShadowMargin, height() - 2 * EditorShadowMargin)
+        : QRectF(EditorShadowMargin, EditorShadowMargin, width() - EditorGutterWidth - 2 * EditorShadowMargin, height() - 2 * EditorShadowMargin);
     QPainterPath path; constexpr qreal radius = 14.0;
     if (onRight) {
         path.moveTo(sheet.left() + radius, sheet.top()); path.lineTo(sheet.right(), sheet.top()); path.lineTo(sheet.right(), sheet.bottom()); path.lineTo(sheet.left() + radius, sheet.bottom());
@@ -373,18 +541,37 @@ void EdgeDockWindow::paintEvent(QPaintEvent *)
         path.moveTo(sheet.left(), sheet.top()); path.lineTo(sheet.right() - radius, sheet.top()); path.quadTo(sheet.right(), sheet.top(), sheet.right(), sheet.top() + radius);
         path.lineTo(sheet.right(), sheet.bottom() - radius); path.quadTo(sheet.right(), sheet.bottom(), sheet.right() - radius, sheet.bottom()); path.lineTo(sheet.left(), sheet.bottom());
     }
-    path.closeSubpath(); painter.setPen(Qt::NoPen); drawSoftShadow(painter, path, onRight ? -12.0 : 12.0, 13.0); painter.setBrush(paper); painter.drawPath(path);
-    const QRect gutter = onRight ? QRect(0, 0, EditorGutterWidth, height()) : QRect(width() - EditorGutterWidth, 0, EditorGutterWidth, height()); painter.fillRect(gutter, QColor(dash.red(), dash.green(), dash.blue(), 42));
-    const int lineX = onRight ? EditorGutterWidth : width() - EditorGutterWidth - 1; const QColor ink = inkColor(paperName); painter.setPen(QPen(QColor(ink.red(), ink.green(), ink.blue(), 72), 1, Qt::DashLine)); painter.drawLine(lineX, 0, lineX, height());
-    painter.save(); painter.translate(gutter.center().x(), gutter.center().y()); painter.rotate(onRight ? 90 : -90); painter.setFont(noteFont(m_settings->noteFont(), 10, QFont::DemiBold)); painter.setPen(QColor(ink.red(), ink.green(), ink.blue(), 170)); painter.drawText(QRect(-height() / 2 + 16, -EditorGutterWidth / 2, height() - 32, EditorGutterWidth), Qt::AlignCenter, note.title.simplified().toUpper()); painter.restore();
+    path.closeSubpath(); drawAllSideShadow(painter, path); painter.setPen(Qt::NoPen); painter.setBrush(paper); painter.drawPath(path);
+    const QRect gutter = onRight ? QRect(EditorShadowMargin, EditorShadowMargin, EditorGutterWidth, static_cast<int>(sheet.height())) : QRect(width() - EditorShadowMargin - EditorGutterWidth, EditorShadowMargin, EditorGutterWidth, static_cast<int>(sheet.height())); painter.fillRect(gutter, QColor(dash.red(), dash.green(), dash.blue(), 96));
+    const int lineX = onRight ? EditorShadowMargin + EditorGutterWidth : width() - EditorShadowMargin - EditorGutterWidth - 1; const QColor ink = inkColor(paperName); painter.setPen(QPen(QColor(ink.red(), ink.green(), ink.blue(), 72), 1, Qt::DashLine)); painter.drawLine(lineX, EditorShadowMargin, lineX, height() - EditorShadowMargin);
+    painter.save(); painter.translate(gutter.center().x(), gutter.center().y()); painter.rotate(onRight ? 90 : -90); painter.setFont(noteFont(m_settings->noteFont(), 10, QFont::DemiBold)); painter.setPen(QColor(ink.red(), ink.green(), ink.blue(), 170)); painter.drawText(QRect(-gutter.height() / 2 + 16, -EditorGutterWidth / 2, gutter.height() - 32, EditorGutterWidth), Qt::AlignCenter, note.title.simplified().toUpper()); painter.restore();
+    if (m_editorOnly) {
+        painter.setPen(QPen(QColor(ink.red(), ink.green(), ink.blue(), 120), 1));
+        const int handleX = onRight ? EditorShadowMargin + 5 : width() - EditorShadowMargin - EditorGutterWidth + 6;
+        for (int offset = 0; offset < 9; offset += 3) {
+            painter.drawLine(handleX + offset, gutter.bottom() - 4, handleX + 12, gutter.bottom() - 16 + offset);
+        }
+    }
 }
 
-void EdgeDockWindow::resizeEvent(QResizeEvent *event) { layoutDeck(); layoutEditor(); updateContentVisibility(); QWidget::resizeEvent(event); }
+void EdgeDockWindow::resizeEvent(QResizeEvent *event)
+{
+    if (m_editorVisible) {
+        m_noteWindowContentSize = QSize(std::max(MinimumEditorWidth, width() - EditorGutterWidth - 2 * EditorShadowMargin), std::max(MinimumEditorHeight, height() - 2 * EditorShadowMargin));
+        if (m_geometryAnimation->state() != QAbstractAnimation::Running) {
+            rememberNoteWindowGeometry();
+        }
+    }
+    layoutDeck(); layoutEditor(); updateContentVisibility(); QWidget::resizeEvent(event);
+}
 void EdgeDockWindow::positionNearScreenEdge() { setGeometry(targetGeometryForWidth(width())); }
 QRect EdgeDockWindow::targetGeometryForWidth(int targetWidth) const
 {
     const QScreen *screen = m_screen != nullptr ? m_screen.data() : QGuiApplication::primaryScreen(); const int height = deckHeight();
     if (screen == nullptr) return QRect(pos(), QSize(targetWidth, height));
+    if (m_editorVisible && m_hasNoteWindowPosition) {
+        return QRect(m_noteWindowPosition, QSize(targetWidth, height));
+    }
     const QRect available = screen->availableGeometry(); const int y = available.y() + (available.height() - height) / 2;
     const int x = m_settings->preferredEdge() == AppSettings::Edge::Right ? available.right() - targetWidth + 1 : available.x(); return QRect(x, y, targetWidth, height);
 }
@@ -392,6 +579,13 @@ QRect EdgeDockWindow::targetGeometryForWidth(int targetWidth) const
 void EdgeDockWindow::selectNote(int index)
 {
     if (index < 0 || index >= m_notes.size()) return;
+    if (!m_editorOnly) {
+        setExpanded(false);
+        if (m_openNoteCallback) {
+            m_openNoteCallback(m_notes.at(index).id);
+        }
+        return;
+    }
     saveCurrentNote(); m_currentNoteIndex = index; setEditorVisible(true); updateEditorFromCurrentNote(); updateNoteButtons(); updateColorButtons();
 }
 void EdgeDockWindow::createNoteAndFocus()
@@ -399,7 +593,16 @@ void EdgeDockWindow::createNoteAndFocus()
     saveCurrentNote(); Note note; QString errorMessage;
     if (!m_repository->createNote(&note, &errorMessage)) { setStatusText(QStringLiteral("Create error: %1").arg(errorMessage)); return; }
     note.color = AvailableColors.front(); m_repository->updateNoteColor(note.id, note.color, nullptr); m_notes.append(note); m_currentNoteIndex = m_notes.size() - 1;
-    setExpanded(true); setEditorVisible(true); updateEditorFromCurrentNote(); m_titleEdit->setFocus(Qt::MouseFocusReason); m_titleEdit->selectAll();
+    if (!m_editorOnly) {
+        m_currentNoteIndex = -1;
+        refreshNotes();
+        setExpanded(false);
+        if (m_openNoteCallback) {
+            m_openNoteCallback(note.id);
+        }
+        return;
+    }
+    setExpanded(true); setEditorVisible(true); updateEditorFromCurrentNote(); m_bodyEdit->setFocus(Qt::MouseFocusReason);
 }
 void EdgeDockWindow::archiveSelectedNote()
 {
@@ -407,6 +610,7 @@ void EdgeDockWindow::archiveSelectedNote()
     saveCurrentNote(); QString errorMessage;
     if (!m_repository->archiveNote(m_notes.at(m_currentNoteIndex).id, &errorMessage)) { setStatusText(QStringLiteral("Archive error: %1").arg(errorMessage)); return; }
     m_notes.removeAt(m_currentNoteIndex); m_currentNoteIndex = -1; setExpanded(false); updateNoteButtons();
+    if (m_notesChangedCallback) m_notesChangedCallback();
 }
 void EdgeDockWindow::deleteCurrentNote()
 {
@@ -414,12 +618,14 @@ void EdgeDockWindow::deleteCurrentNote()
     finalizePendingDelete(); saveCurrentNote(); const int index = m_currentNoteIndex; m_pendingDeleteNoteId = m_notes.at(index).id; QString errorMessage;
     if (!m_repository->markNoteDeleted(m_pendingDeleteNoteId, &errorMessage)) { setStatusText(QStringLiteral("Delete error: %1").arg(errorMessage)); m_pendingDeleteNoteId = 0; return; }
     m_notes.removeAt(index); m_currentNoteIndex = -1; m_undoButton->show(); m_deleteUndoTimer->start(); setExpanded(false); updateNoteButtons();
+    if (m_notesChangedCallback) m_notesChangedCallback();
 }
 void EdgeDockWindow::undoDelete()
 {
     if (m_pendingDeleteNoteId == 0) return;
     const int id = m_pendingDeleteNoteId; m_pendingDeleteNoteId = 0; m_deleteUndoTimer->stop(); m_undoButton->hide(); QString errorMessage;
     if (!m_repository->restoreDeletedNote(id, &errorMessage)) { setStatusText(QStringLiteral("Undo error: %1").arg(errorMessage)); return; } refreshNotes();
+    if (m_notesChangedCallback) m_notesChangedCallback();
 }
 void EdgeDockWindow::finalizePendingDelete()
 {
@@ -440,6 +646,7 @@ void EdgeDockWindow::saveCurrentNote()
 {
     if (m_currentNoteIndex < 0 || m_currentNoteIndex >= m_notes.size()) return;
     Note &note = m_notes[m_currentNoteIndex]; note.title = m_titleEdit->text().trimmed(); if (note.title.isEmpty()) note.title = QStringLiteral("Untitled"); note.tags = m_tagsEdit->text().trimmed(); note.body = m_bodyEdit->toPlainText();
+    m_settings->setNoteBodyCursorPosition(note.id, m_bodyEdit->textCursor().position());
     QString errorMessage;
     if (m_repository->saveNote(note, &errorMessage)) { setStatusText(QStringLiteral("Saved · just now")); updateNoteButtons(); } else setStatusText(QStringLiteral("Save error: %1").arg(errorMessage));
 }
@@ -453,12 +660,34 @@ void EdgeDockWindow::setExpanded(bool expanded)
         m_keepOpen = false;
         m_pinButton->setChecked(false);
         setEditorVisible(false);
+        if (m_editorOnly) {
+            hide();
+            updateContentVisibility();
+            update();
+            return;
+        }
     } else m_collapseTimer->stop();
     m_geometryAnimation->stop(); m_geometryAnimation->setEasingCurve(expanded ? QEasingCurve::OutCubic : QEasingCurve::InCubic); m_geometryAnimation->setStartValue(geometry()); m_geometryAnimation->setEndValue(targetGeometryForWidth(expanded ? expandedWidth() : CollapsedWidth)); m_geometryAnimation->start(); updateContentVisibility(); layoutDeck(); update();
 }
 void EdgeDockWindow::setEditorVisible(bool visible)
 {
-    m_editorVisible = visible; if (!visible) m_currentNoteIndex = -1;
+    if (visible && !m_editorVisible) {
+        prepareNoteWindowGeometry();
+        setMinimumSize(MinimumEditorWidth + EditorGutterWidth + 2 * EditorShadowMargin, MinimumEditorHeight + 2 * EditorShadowMargin);
+    }
+    m_editorVisible = visible;
+    if (!visible) {
+        m_currentNoteIndex = -1;
+        m_draggingNoteWindow = false;
+        m_resizingNoteWindow = false;
+        setMinimumSize(0, 0);
+        if (!m_settings->rememberNoteWindowSize()) {
+            m_noteWindowContentSize = QSize(DefaultEditorWidth, DefaultEditorHeight);
+        }
+        if (!m_settings->rememberNoteWindowPosition()) {
+            m_hasNoteWindowPosition = false;
+        }
+    }
     if (m_expanded) { m_geometryAnimation->stop(); m_geometryAnimation->setStartValue(geometry()); m_geometryAnimation->setEndValue(targetGeometryForWidth(expandedWidth())); m_geometryAnimation->start(); }
     layoutDeck(); layoutEditor(); updateContentVisibility(); update();
 }
@@ -467,14 +696,27 @@ int EdgeDockWindow::pillHeight() const { const int shown = std::max(1, std::min(
 int EdgeDockWindow::fanHeight() const
 {
     const int count = visibleNoteCount();
-    const int tabStackHeight = count == 0
-        ? TabHeight
-        : (count - 1) * TabPitch + TabHeight;
+    int tabStackHeight = TabHeight;
+    for (int index = 0; index < count - 1; ++index) {
+        tabStackHeight += fanTabVisibleStrip(index);
+    }
     const int moreHeight = m_notes.size() > count ? 41 : 0;
     return tabStackHeight + 7 + moreHeight + 5 + PlusButtonSize + 4;
 }
-int EdgeDockWindow::deckHeight() const { if (!m_expanded) return pillHeight(); return m_editorVisible ? EditorHeight : fanHeight(); }
-int EdgeDockWindow::expandedWidth() const { return m_editorVisible ? EditorWidth + EditorGutterWidth : FanWidth; }
+int EdgeDockWindow::fanTabVisibleStrip(int index) const
+{
+    if (index < 0 || index >= m_notes.size()) {
+        return TabPitch;
+    }
+
+    QFont font = noteFont(m_settings->noteFont(), 10, QFont::Medium);
+    font.setPointSizeF(9.5);
+    font.setLetterSpacing(QFont::AbsoluteSpacing, 0.1);
+    const int titleWidth = static_cast<int>(std::ceil(QFontMetricsF(font).horizontalAdvance(fanTitle(m_notes.at(index).title).toUpper())));
+    return std::clamp(titleWidth + 12, TabPitch, TabHeight);
+}
+int EdgeDockWindow::deckHeight() const { if (!m_expanded) return pillHeight(); return m_editorVisible ? noteWindowSize().height() : fanHeight(); }
+int EdgeDockWindow::expandedWidth() const { return m_editorVisible ? noteWindowSize().width() : FanWidth; }
 int EdgeDockWindow::visibleNoteCount() const { return std::min(static_cast<int>(m_notes.size()), std::clamp(m_settings->maxVisibleNotes(), 1, MaxDeckButtons)); }
 void EdgeDockWindow::updateColorButtons()
 {
@@ -496,8 +738,12 @@ void EdgeDockWindow::updateEditorFromCurrentNote()
     for (QWidget *widget : {static_cast<QWidget *>(m_titleEdit), static_cast<QWidget *>(m_bodyEdit), static_cast<QWidget *>(m_archiveButton), static_cast<QWidget *>(m_deleteButton), static_cast<QWidget *>(m_checklistButton), static_cast<QWidget *>(m_pinButton)}) widget->setEnabled(hasNote);
     for (QPushButton *button : m_colorButtons) button->setEnabled(hasNote);
     if (hasNote) {
-        const Note &note = m_notes.at(m_currentNoteIndex); m_titleEdit->setText(note.title); m_tagsEdit->setText(note.tags); m_bodyEdit->setPlainText(note.body); const QColor ink = inkColor(paperColor(note.color));
-        m_editorPanel->setStyleSheet(QStringLiteral("QLineEdit, QPlainTextEdit { background: transparent; border: 0; color: %1; selection-background-color: rgba(255,255,255,120); } QLineEdit { padding: 2px 0; } QPlainTextEdit { padding: 9px 8px; } QLabel { color: rgba(%2,%3,%4,130); font-size: 10px; } QPushButton { background: rgba(61,36,47,22); border: 0; border-radius: 6px; color: %1; padding: 3px 9px; font-size: 11px; } QPushButton:hover { background: rgba(61,36,47,42); }").arg(ink.name()).arg(ink.red()).arg(ink.green()).arg(ink.blue()));
+        const Note &note = m_notes.at(m_currentNoteIndex); m_titleEdit->setText(note.title); m_tagsEdit->setText(note.tags); m_bodyEdit->setPlainText(note.body);
+        QTextCursor cursor = m_bodyEdit->textCursor();
+        cursor.setPosition(std::clamp(m_bodyCursorPositions.value(note.id, m_settings->noteBodyCursorPosition(note.id)), 0, static_cast<int>(note.body.size())));
+        m_bodyEdit->setTextCursor(cursor);
+        const QColor ink = inkColor(paperColor(note.color));
+        m_editorPanel->setStyleSheet(QStringLiteral("QLineEdit, QPlainTextEdit { background: transparent; border: 0; color: %1; selection-background-color: rgba(74,45,57,185); selection-color: #fff8f1; } QLineEdit { padding: 2px 0; } QPlainTextEdit { padding: 9px 8px; } QLabel { color: rgba(%2,%3,%4,130); font-size: 10px; } QPushButton { background: rgba(61,36,47,22); border: 0; border-radius: 6px; color: %1; padding: 3px 9px; font-size: 11px; } QPushButton:hover { background: rgba(61,36,47,42); }").arg(ink.name()).arg(ink.red()).arg(ink.green()).arg(ink.blue()));
         setStatusText(QStringLiteral("Saved · just now"));
     } else { m_titleEdit->clear(); m_tagsEdit->clear(); m_bodyEdit->clear(); }
     m_loadingEditor = false;
@@ -507,7 +753,7 @@ void EdgeDockWindow::updateNoteButtons()
     const int limit = visibleNoteCount();
     for (int index = 0; index < m_noteButtons.size(); ++index) {
         QPushButton *button = m_noteButtons.at(index); const bool hasNote = index < limit && index < m_notes.size(); button->setProperty("hasNote", hasNote); if (!hasNote) continue;
-        if (auto *tab = dynamic_cast<StickyTabButton *>(button)) tab->setNote(m_notes.at(index), m_settings->preferredEdge(), m_settings->noteFont(), index == limit - 1 ? TabHeight : TabPitch);
+        if (auto *tab = dynamic_cast<StickyTabButton *>(button)) tab->setNote(m_notes.at(index), m_settings->preferredEdge(), m_settings->noteFont(), index == limit - 1 ? TabHeight : fanTabVisibleStrip(index));
         button->setToolTip(m_notes.at(index).title);
     }
     const int hidden = std::max(0, static_cast<int>(m_notes.size()) - limit); m_moreButton->setProperty("hasMore", hidden > 0); m_moreButton->setText(QStringLiteral("+%1").arg(hidden));
@@ -519,19 +765,98 @@ void EdgeDockWindow::layoutDeck()
 {
     if (!m_expanded || m_editorVisible) return;
     const bool onRight = m_settings->preferredEdge() == AppSettings::Edge::Right; const int x = onRight ? width() - TabWidth : 0; const int count = visibleNoteCount();
-    for (int index = 0; index < count; ++index) m_noteButtons.at(index)->setGeometry(0, index * TabPitch, FanWidth, TabHeight);
-    int y = count == 0 ? 0 : (count - 1) * TabPitch + TabHeight + 7;
+    int y = 0;
+    for (int index = 0; index < count; ++index) {
+        m_noteButtons.at(index)->setGeometry(0, y, FanWidth, TabHeight);
+        y += index == count - 1 ? TabHeight : fanTabVisibleStrip(index);
+    }
+    y += 7;
     if (m_notes.size() > count) { m_moreButton->move(x, y); y += 41; }
     m_createButton->move(x + (TabWidth - PlusButtonSize) / 2, y + 5);
 }
 void EdgeDockWindow::layoutEditor()
 {
     if (!m_editorVisible) return;
-    m_editorPanel->setGeometry(m_settings->preferredEdge() == AppSettings::Edge::Right ? EditorGutterWidth : 0, 0, EditorWidth, EditorHeight);
+    const int contentWidth = std::max(0, width() - EditorGutterWidth - 2 * EditorShadowMargin);
+    const bool onRight = m_settings->preferredEdge() == AppSettings::Edge::Right;
+    m_editorPanel->setGeometry(onRight ? EditorShadowMargin + EditorGutterWidth : EditorShadowMargin, EditorShadowMargin, contentWidth, std::max(0, height() - 2 * EditorShadowMargin));
+}
+QSize EdgeDockWindow::noteWindowSize() const
+{
+    return QSize(m_noteWindowContentSize.width() + EditorGutterWidth + 2 * EditorShadowMargin, m_noteWindowContentSize.height() + 2 * EditorShadowMargin);
+}
+QPoint EdgeDockWindow::defaultNoteWindowPosition(const QSize &size) const
+{
+    const QScreen *screen = m_screen != nullptr ? m_screen.data() : QGuiApplication::primaryScreen();
+    if (screen == nullptr) {
+        return pos();
+    }
+    const QRect available = screen->availableGeometry();
+    const int y = available.y() + (available.height() - size.height()) / 2;
+    const int x = m_settings->preferredEdge() == AppSettings::Edge::Right ? available.right() - size.width() + 1 : available.x();
+    return QPoint(x, y);
+}
+void EdgeDockWindow::prepareNoteWindowGeometry()
+{
+    const int noteId = currentNoteId();
+    if (m_settings->rememberNoteWindowSize() && noteId > 0) {
+        const QSize savedSize = m_settings->noteWindowSize(noteId);
+        if (savedSize.width() >= MinimumEditorWidth + EditorGutterWidth + 2 * EditorShadowMargin && savedSize.height() >= MinimumEditorHeight + 2 * EditorShadowMargin) {
+            m_noteWindowContentSize = QSize(savedSize.width() - EditorGutterWidth - 2 * EditorShadowMargin, savedSize.height() - 2 * EditorShadowMargin);
+        }
+    } else {
+        m_noteWindowContentSize = QSize(DefaultEditorWidth, DefaultEditorHeight);
+    }
+
+    if (m_settings->rememberNoteWindowPosition() && noteId > 0 && m_settings->hasNoteWindowPosition(noteId)) {
+        m_noteWindowPosition = m_settings->noteWindowPosition(noteId);
+        m_hasNoteWindowPosition = true;
+    } else {
+        m_noteWindowPosition = defaultNoteWindowPosition(noteWindowSize());
+        m_hasNoteWindowPosition = true;
+    }
+}
+bool EdgeDockWindow::isNoteWindowDragHandle(const QPoint &position) const
+{
+    if (!m_editorVisible) {
+        return false;
+    }
+    return m_settings->preferredEdge() == AppSettings::Edge::Right
+        ? position.x() >= EditorShadowMargin && position.x() < EditorShadowMargin + EditorGutterWidth
+        : position.x() >= width() - EditorShadowMargin - EditorGutterWidth && position.x() < width() - EditorShadowMargin;
+}
+bool EdgeDockWindow::isNoteWindowResizeHandle(const QPoint &position) const
+{
+    if (!m_editorOnly || !m_editorVisible || position.y() < height() - EditorShadowMargin - 22) {
+        return false;
+    }
+    return m_settings->preferredEdge() == AppSettings::Edge::Right
+        ? position.x() >= EditorShadowMargin && position.x() < EditorShadowMargin + EditorGutterWidth
+        : position.x() >= width() - EditorShadowMargin - EditorGutterWidth && position.x() < width() - EditorShadowMargin;
+}
+void EdgeDockWindow::rememberNoteWindowGeometry()
+{
+    const int noteId = currentNoteId();
+    if (noteId <= 0) {
+        return;
+    }
+    if (m_settings->rememberNoteWindowSize()) {
+        m_settings->setNoteWindowSize(noteId, size());
+    }
+    if (m_settings->rememberNoteWindowPosition() && m_hasNoteWindowPosition) {
+        m_settings->setNoteWindowPosition(noteId, m_noteWindowPosition);
+    }
+}
+int EdgeDockWindow::currentNoteId() const
+{
+    return m_currentNoteIndex >= 0 && m_currentNoteIndex < m_notes.size() ? m_notes.at(m_currentNoteIndex).id : 0;
 }
 void EdgeDockWindow::updateNoteColor(const QString &color)
 {
     if (m_currentNoteIndex < 0 || m_currentNoteIndex >= m_notes.size()) return;
     Note &note = m_notes[m_currentNoteIndex]; note.color = color; QString errorMessage;
-    if (m_repository->updateNoteColor(note.id, color, &errorMessage)) { updateEditorFromCurrentNote(); updateNoteButtons(); updateColorButtons(); update(); } else setStatusText(QStringLiteral("Color error: %1").arg(errorMessage));
+    if (m_repository->updateNoteColor(note.id, color, &errorMessage)) {
+        updateEditorFromCurrentNote(); updateNoteButtons(); updateColorButtons(); update();
+        if (m_notesChangedCallback) m_notesChangedCallback();
+    } else setStatusText(QStringLiteral("Color error: %1").arg(errorMessage));
 }

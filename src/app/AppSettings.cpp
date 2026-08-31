@@ -2,9 +2,27 @@
 
 #include <QSettings>
 
+#include <algorithm>
+
 namespace {
 constexpr int DefaultMaxVisibleNotes = 8;
 constexpr int DefaultAnimationDurationMs = 180;
+constexpr int DefaultNoteBodyFontSize = 14;
+
+QString noteWindowSizeKey(int noteId)
+{
+    return QStringLiteral("noteWindowSizes/%1").arg(noteId);
+}
+
+QString noteWindowPositionKey(int noteId)
+{
+    return QStringLiteral("noteWindowPositions/%1").arg(noteId);
+}
+
+QString noteBodyCursorPositionKey(int noteId)
+{
+    return QStringLiteral("noteBodyCursorPositions/%1").arg(noteId);
+}
 
 QString edgeToString(AppSettings::Edge edge)
 {
@@ -123,6 +141,76 @@ AppSettings::NoteFont AppSettings::noteFont() const
 void AppSettings::setNoteFont(NoteFont noteFont)
 {
     QSettings().setValue(QStringLiteral("appearance/noteFont"), noteFontToString(noteFont));
+}
+
+int AppSettings::noteBodyFontSize() const
+{
+    return qBound(8, QSettings().value(QStringLiteral("appearance/noteBodyFontSize"), DefaultNoteBodyFontSize).toInt(), 32);
+}
+
+void AppSettings::setNoteBodyFontSize(int pointSize)
+{
+    QSettings().setValue(QStringLiteral("appearance/noteBodyFontSize"), qBound(8, pointSize, 32));
+}
+
+bool AppSettings::rememberNoteWindowSize() const
+{
+    return QSettings().value(QStringLiteral("appearance/rememberNoteWindowSize"), true).toBool();
+}
+
+void AppSettings::setRememberNoteWindowSize(bool enabled)
+{
+    QSettings().setValue(QStringLiteral("appearance/rememberNoteWindowSize"), enabled);
+}
+
+QSize AppSettings::noteWindowSize(int noteId) const
+{
+    return QSettings().value(noteWindowSizeKey(noteId)).toSize();
+}
+
+void AppSettings::setNoteWindowSize(int noteId, const QSize &size)
+{
+    QSettings().setValue(noteWindowSizeKey(noteId), size);
+}
+
+bool AppSettings::rememberNoteWindowPosition() const
+{
+    return QSettings().value(QStringLiteral("appearance/rememberNoteWindowPosition"), true).toBool();
+}
+
+void AppSettings::setRememberNoteWindowPosition(bool enabled)
+{
+    QSettings().setValue(QStringLiteral("appearance/rememberNoteWindowPosition"), enabled);
+}
+
+bool AppSettings::hasNoteWindowPosition(int noteId) const
+{
+    return QSettings().contains(noteWindowPositionKey(noteId));
+}
+
+QPoint AppSettings::noteWindowPosition(int noteId) const
+{
+    return QSettings().value(noteWindowPositionKey(noteId)).toPoint();
+}
+
+void AppSettings::setNoteWindowPosition(int noteId, const QPoint &position)
+{
+    QSettings().setValue(noteWindowPositionKey(noteId), position);
+}
+
+void AppSettings::clearNoteWindowPositions()
+{
+    QSettings().remove(QStringLiteral("noteWindowPositions"));
+}
+
+int AppSettings::noteBodyCursorPosition(int noteId) const
+{
+    return std::max(0, QSettings().value(noteBodyCursorPositionKey(noteId), 0).toInt());
+}
+
+void AppSettings::setNoteBodyCursorPosition(int noteId, int position)
+{
+    QSettings().setValue(noteBodyCursorPositionKey(noteId), std::max(0, position));
 }
 
 bool AppSettings::launchAtStartup() const

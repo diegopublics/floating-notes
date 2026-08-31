@@ -21,7 +21,7 @@ SettingsDialog::SettingsDialog(AppSettings *settings,
     , m_settingsChangedCallback(std::move(settingsChangedCallback))
 {
     setWindowTitle("Settings");
-    resize(360, 240);
+    resize(390, 340);
     buildUi();
     loadSettings();
 }
@@ -63,6 +63,17 @@ void SettingsDialog::buildUi()
     m_noteFontCombo->addItem("Classic", static_cast<int>(AppSettings::NoteFont::Classic));
     formLayout->addRow("Note font", m_noteFontCombo);
 
+    m_noteBodyFontSizeSpin = new QSpinBox(this);
+    m_noteBodyFontSizeSpin->setRange(8, 32);
+    m_noteBodyFontSizeSpin->setSuffix(" pt");
+    formLayout->addRow("Note body size", m_noteBodyFontSizeSpin);
+
+    m_rememberNoteWindowSizeCheck = new QCheckBox("Remember note window size", this);
+    formLayout->addRow(QString(), m_rememberNoteWindowSizeCheck);
+
+    m_rememberNoteWindowPositionCheck = new QCheckBox("Remember note window position", this);
+    formLayout->addRow(QString(), m_rememberNoteWindowPositionCheck);
+
     m_startupCheck = new QCheckBox("Launch when Windows starts", this);
     formLayout->addRow(QString(), m_startupCheck);
 
@@ -89,6 +100,9 @@ void SettingsDialog::loadSettings()
     m_animationSpin->setValue(m_settings->animationDurationMs());
     m_themeCombo->setCurrentIndex(m_themeCombo->findData(static_cast<int>(m_settings->theme())));
     m_noteFontCombo->setCurrentIndex(m_noteFontCombo->findData(static_cast<int>(m_settings->noteFont())));
+    m_noteBodyFontSizeSpin->setValue(m_settings->noteBodyFontSize());
+    m_rememberNoteWindowSizeCheck->setChecked(m_settings->rememberNoteWindowSize());
+    m_rememberNoteWindowPositionCheck->setChecked(m_settings->rememberNoteWindowPosition());
     m_startupCheck->setChecked(m_settings->launchAtStartup());
 }
 
@@ -99,6 +113,9 @@ void SettingsDialog::applySettings()
     m_settings->setAnimationDurationMs(m_animationSpin->value());
     m_settings->setTheme(static_cast<AppSettings::Theme>(m_themeCombo->currentData().toInt()));
     m_settings->setNoteFont(static_cast<AppSettings::NoteFont>(m_noteFontCombo->currentData().toInt()));
+    m_settings->setNoteBodyFontSize(m_noteBodyFontSizeSpin->value());
+    m_settings->setRememberNoteWindowSize(m_rememberNoteWindowSizeCheck->isChecked());
+    m_settings->setRememberNoteWindowPosition(m_rememberNoteWindowPositionCheck->isChecked());
 
     const bool startupEnabled = m_startupCheck->isChecked();
     QString errorMessage;

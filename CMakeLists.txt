@@ -38,6 +38,8 @@ qt_add_executable(FloatingNotes
     src/ui/AppTheme.h
     src/ui/EdgeDockWindow.cpp
     src/ui/EdgeDockWindow.h
+    src/ui/HelpDialog.cpp
+    src/ui/HelpDialog.h
     src/ui/SettingsDialog.cpp
     src/ui/SettingsDialog.h
 )

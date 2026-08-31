@@ -31,6 +31,9 @@ private:
     QSpinBox *m_animationSpin = nullptr;
     QComboBox *m_themeCombo = nullptr;
     QComboBox *m_noteFontCombo = nullptr;
+    QSpinBox *m_noteBodyFontSizeSpin = nullptr;
+    QCheckBox *m_rememberNoteWindowSizeCheck = nullptr;
+    QCheckBox *m_rememberNoteWindowPositionCheck = nullptr;
     QCheckBox *m_startupCheck = nullptr;
     QLabel *m_statusLabel = nullptr;
 };
