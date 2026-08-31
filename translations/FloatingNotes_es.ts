@@ -58,7 +58,7 @@
     <message>
       <location filename="../src/ui/AllNotesWindow.cpp" line="168" />
       <source>Title</source>
-      <translation>TÃ­tulo</translation>
+      <translation>Título</translation>
     </message>
     <message>
       <location filename="../src/ui/AllNotesWindow.cpp" line="175" />
@@ -107,7 +107,7 @@
     <message>
       <location filename="../src/ui/AllNotesWindow.cpp" line="266" />
       <source>Untitled</source>
-      <translation>Sin tÃ­tulo</translation>
+      <translation>Sin título</translation>
     </message>
     <message>
       <location filename="../src/ui/AllNotesWindow.cpp" line="273" />
@@ -159,7 +159,7 @@
     <message>
       <location filename="../src/ui/AllNotesWindow.cpp" line="390" />
       <source>Previous version restored</source>
-      <translation>VersiÃ³n anterior restaurada</translation>
+      <translation>Versión anterior restaurada</translation>
     </message>
     <message>
       <location filename="../src/ui/AllNotesWindow.cpp" line="404" />
@@ -169,12 +169,12 @@
     <message>
       <location filename="../src/ui/AllNotesWindow.cpp" line="410" />
       <source>Next version restored</source>
-      <translation>Siguiente versiÃ³n restaurada</translation>
+      <translation>Siguiente versión restaurada</translation>
     </message>
     <message>
       <location filename="../src/ui/AllNotesWindow.cpp" line="427" />
       <source>Delete cleanup error: %1</source>
-      <translation>Error al limpiar la eliminaciÃ³n: %1</translation>
+      <translation>Error al limpiar la eliminación: %1</translation>
     </message>
     <message>
       <location filename="../src/ui/AllNotesWindow.cpp" line="434" />
@@ -189,7 +189,7 @@
     <message>
       <location filename="../src/ui/AllNotesWindow.cpp" line="443" />
       <source>Import error: %1</source>
-      <translation>Error de importaciÃ³n: %1</translation>
+      <translation>Error de importación: %1</translation>
     </message>
     <message>
       <location filename="../src/ui/AllNotesWindow.cpp" line="447" />
@@ -211,7 +211,7 @@
       <location filename="../src/ui/AllNotesWindow.cpp" line="476" />
       <location filename="../src/ui/AllNotesWindow.cpp" line="491" />
       <source>Export error: %1</source>
-      <translation>Error de exportaciÃ³n: %1</translation>
+      <translation>Error de exportación: %1</translation>
     </message>
     <message>
       <location filename="../src/ui/AllNotesWindow.cpp" line="464" />
@@ -248,22 +248,22 @@
     <name>AppController</name>
     <message>
       <location filename="../src/app/AppController.cpp" line="73" />
-      <source>New Note</source>
+      <source>New note</source>
       <translation>Nueva nota</translation>
     </message>
     <message>
       <location filename="../src/app/AppController.cpp" line="76" />
-      <source>All Notes</source>
+      <source>All notes</source>
       <translation>Todas las notas</translation>
     </message>
     <message>
       <location filename="../src/app/AppController.cpp" line="79" />
-      <source>Archive Current</source>
+      <source>Archive current</source>
       <translation>Archivar actual</translation>
     </message>
     <message>
       <location filename="../src/app/AppController.cpp" line="82" />
-      <source>Reset Note Window Positions</source>
+      <source>Reset note window positions</source>
       <translation>Restablecer posiciones de ventanas de notas</translation>
     </message>
     <message>
@@ -274,16 +274,16 @@
     <message>
       <location filename="../src/app/AppController.cpp" line="88" />
       <source>Settings</source>
-      <translation>ConfiguraciÃ³n</translation>
+      <translation>Configuración</translation>
     </message>
     <message>
       <location filename="../src/app/AppController.cpp" line="92" />
-      <source>Show Docks</source>
+      <source>Show docks</source>
       <translation>Mostrar paneles</translation>
     </message>
     <message>
       <location filename="../src/app/AppController.cpp" line="95" />
-      <source>Hide Docks</source>
+      <source>Hide docks</source>
       <translation>Ocultar paneles</translation>
     </message>
     <message>
@@ -307,7 +307,7 @@
     <message>
       <location filename="../src/ui/EdgeDockWindow.cpp" line="311" />
       <source>Untitled</source>
-      <translation>Sin tÃ­tulo</translation>
+      <translation>Sin título</translation>
     </message>
     <message>
       <location filename="../src/ui/EdgeDockWindow.cpp" line="321" />
@@ -328,7 +328,7 @@
     <message>
       <location filename="../src/ui/EdgeDockWindow.cpp" line="335" />
       <source>Allow this note to close automatically</source>
-      <translation>Permitir que esta nota se cierre automÃ¡ticamente</translation>
+      <translation>Permitir que esta nota se cierre automáticamente</translation>
     </message>
     <message>
       <location filename="../src/ui/EdgeDockWindow.cpp" line="336" />
@@ -519,17 +519,17 @@
     <message>
       <location filename="../src/ui/SettingsDialog.cpp" line="23" />
       <source>Settings</source>
-      <translation>ConfiguraciÃ³n</translation>
+      <translation>Configuración</translation>
     </message>
     <message>
       <location filename="../src/ui/SettingsDialog.cpp" line="39" />
       <source>English</source>
-      <translation>InglÃ©s</translation>
+      <translation>Inglés</translation>
     </message>
     <message>
       <location filename="../src/ui/SettingsDialog.cpp" line="40" />
       <source>Spanish</source>
-      <translation>EspaÃ±ol</translation>
+      <translation>Español</translation>
     </message>
     <message>
       <location filename="../src/ui/SettingsDialog.cpp" line="41" />
@@ -564,7 +564,7 @@
     <message>
       <location filename="../src/ui/SettingsDialog.cpp" line="55" />
       <source>Animation</source>
-      <translation>AnimaciÃ³n</translation>
+      <translation>Animación</translation>
     </message>
     <message>
       <location filename="../src/ui/SettingsDialog.cpp" line="58" />
@@ -609,7 +609,7 @@
     <message>
       <location filename="../src/ui/SettingsDialog.cpp" line="68" />
       <source>Classic</source>
-      <translation>ClÃ¡sica</translation>
+      <translation>Clásica</translation>
     </message>
     <message>
       <location filename="../src/ui/SettingsDialog.cpp" line="69" />
@@ -624,17 +624,22 @@
     <message>
       <location filename="../src/ui/SettingsDialog.cpp" line="74" />
       <source>Note body size</source>
-      <translation>TamaÃ±o del cuerpo</translation>
+      <translation>Tamaño del cuerpo</translation>
     </message>
     <message>
       <location filename="../src/ui/SettingsDialog.cpp" line="76" />
       <source>Remember note window size</source>
-      <translation>Recordar tamaÃ±o de ventana de nota</translation>
+      <translation>Recordar tamaño de ventana de nota</translation>
     </message>
     <message>
       <location filename="../src/ui/SettingsDialog.cpp" line="79" />
       <source>Remember note window position</source>
-      <translation>Recordar posiciÃ³n de ventana de nota</translation>
+      <translation>Recordar posición de ventana de nota</translation>
+    </message>
+    <message>
+      <location filename="../src/ui/SettingsDialog.cpp" line="82" />
+      <source>Restore pinned notes on startup</source>
+      <translation>Restaurar notas fijadas al iniciar</translation>
     </message>
     <message>
       <location filename="../src/ui/SettingsDialog.cpp" line="82" />
@@ -654,7 +659,7 @@
     <message>
       <location filename="../src/ui/SettingsDialog.cpp" line="145" />
       <source>Saved. Language changes take effect after restarting the application.</source>
-      <translation>Guardado. El cambio de idioma se aplicarÃ¡ al reiniciar la aplicaciÃ³n.</translation>
+      <translation>Guardado. El cambio de idioma se aplicará al reiniciar la aplicación.</translation>
     </message>
   </context>
 </TS>

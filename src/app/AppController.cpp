@@ -47,6 +47,9 @@ bool AppController::start(QString *errorMessage)
     applySettings();
     rebuildDocks();
     buildTray();
+    if (m_settings.restorePinnedNotesOnStartup()) {
+        restorePinnedNotes();
+    }
 
     m_hotkeys = std::make_unique<GlobalHotkeys>([this](GlobalHotkeys::Action action) {
         handleHotkey(action);
@@ -60,6 +63,7 @@ bool AppController::start(QString *errorMessage)
     connect(qApp, &QGuiApplication::screenRemoved, this, [this] {
         rebuildDocks();
     });
+    connect(qApp, &QCoreApplication::aboutToQuit, this, &AppController::saveOpenNoteState);
     return true;
 }
 
@@ -70,16 +74,16 @@ void AppController::buildTray()
     }
 
     m_trayMenu = new QMenu;
-    m_trayMenu->addAction(tr("New Note"), this, [this] {
+    m_trayMenu->addAction(tr("New note"), this, [this] {
         createNote();
     });
-    m_trayMenu->addAction(tr("All Notes"), this, [this] {
+    m_trayMenu->addAction(tr("All notes"), this, [this] {
         showAllNotes();
     });
-    m_trayMenu->addAction(tr("Archive Current"), this, [this] {
+    m_trayMenu->addAction(tr("Archive current"), this, [this] {
         archiveCurrentNote();
     });
-    m_trayMenu->addAction(tr("Reset Note Window Positions"), this, [this] {
+    m_trayMenu->addAction(tr("Reset note window positions"), this, [this] {
         resetNoteWindowPositions();
     });
     m_trayMenu->addAction(tr("Help"), this, [this] {
@@ -89,10 +93,10 @@ void AppController::buildTray()
         showSettings();
     });
     m_trayMenu->addSeparator();
-    m_trayMenu->addAction(tr("Show Docks"), this, [this] {
+    m_trayMenu->addAction(tr("Show docks"), this, [this] {
         showDocks();
     });
-    m_trayMenu->addAction(tr("Hide Docks"), this, [this] {
+    m_trayMenu->addAction(tr("Hide docks"), this, [this] {
         hideDocks();
     });
     m_trayMenu->addAction(tr("Exit"), this, [this] {
@@ -175,7 +179,7 @@ void AppController::archiveCurrentNote()
     }
 }
 
-void AppController::openNote(int noteId)
+void AppController::openNote(int noteId, bool restoringPinnedNote)
 {
     for (EdgeDockWindow *editor : m_noteEditorWindows) {
         if (editor->isVisible() && editor->isEditingNote(noteId)) {
@@ -211,16 +215,58 @@ void AppController::openNote(int noteId)
         m_noteEditorWindows.append(editor);
     }
 
-    editor->openNote(noteId);
-    const auto visibleEditor = std::find_if(m_noteEditorWindows.crbegin(), m_noteEditorWindows.crend(), [editor](EdgeDockWindow *candidate) {
-        return candidate != editor && candidate->isVisible();
-    });
-    if (visibleEditor != m_noteEditorWindows.crend()) {
-        editor->moveNoteWindowTo((*visibleEditor)->pos() + QPoint(32, 32));
+    editor->openNote(noteId, !restoringPinnedNote);
+    if (restoringPinnedNote) {
+        editor->setPinned(true);
+    } else {
+        const auto visibleEditor = std::find_if(m_noteEditorWindows.crbegin(), m_noteEditorWindows.crend(), [editor](EdgeDockWindow *candidate) {
+            return candidate != editor && candidate->isVisible();
+        });
+        if (visibleEditor != m_noteEditorWindows.crend()) {
+            editor->moveNoteWindowTo((*visibleEditor)->pos() + QPoint(32, 32));
+        }
     }
     editor->show();
-    editor->raise();
-    editor->activateWindow();
+    if (!restoringPinnedNote) {
+        editor->raise();
+        editor->activateWindow();
+    }
+}
+
+void AppController::restorePinnedNotes()
+{
+    QVector<int> restoredNoteIds;
+    for (const int noteId : m_settings.pinnedNoteIds()) {
+        openNote(noteId, true);
+        const bool restored = std::any_of(m_noteEditorWindows.cbegin(), m_noteEditorWindows.cend(), [noteId](const EdgeDockWindow *editor) {
+            return editor->pinnedNoteId() == noteId;
+        });
+        if (restored) {
+            restoredNoteIds.append(noteId);
+        }
+    }
+    m_settings.setPinnedNoteIds(restoredNoteIds);
+}
+
+void AppController::saveOpenNoteState()
+{
+    for (EdgeDockWindow *editor : m_noteEditorWindows) {
+        editor->saveCurrentNoteNow();
+    }
+
+    if (!m_settings.restorePinnedNotesOnStartup()) {
+        m_settings.setPinnedNoteIds({});
+        return;
+    }
+
+    QVector<int> pinnedNoteIds;
+    for (EdgeDockWindow *editor : m_noteEditorWindows) {
+        const int noteId = editor->pinnedNoteId();
+        if (noteId > 0 && !pinnedNoteIds.contains(noteId)) {
+            pinnedNoteIds.append(noteId);
+        }
+    }
+    m_settings.setPinnedNoteIds(pinnedNoteIds);
 }
 
 void AppController::resetNoteWindowPositions()

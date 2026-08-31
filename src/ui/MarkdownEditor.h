@@ -37,11 +37,13 @@ private:
     void applyHighlightColor(const QColor &color);
     void clearCharacterProperty(int property);
     void applyHeading();
+    void applyQuote();
     void applyList(QTextListFormat::Style style);
     void insertLink();
     void updateToolbarState();
 
     QTextEdit *m_editor = nullptr;
+    QToolButton *m_headingButton = nullptr;
     QToolButton *m_boldButton = nullptr;
     QToolButton *m_italicButton = nullptr;
     QToolButton *m_strikeButton = nullptr;

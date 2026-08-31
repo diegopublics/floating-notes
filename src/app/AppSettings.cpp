@@ -233,6 +233,40 @@ void AppSettings::setNoteBodyCursorPosition(int noteId, int position)
     QSettings().setValue(noteBodyCursorPositionKey(noteId), std::max(0, position));
 }
 
+QVector<int> AppSettings::pinnedNoteIds() const
+{
+    QVector<int> noteIds;
+    for (const QString &value : QSettings().value(QStringLiteral("session/pinnedNoteIds")).toStringList()) {
+        bool isNumber = false;
+        const int noteId = value.toInt(&isNumber);
+        if (isNumber && noteId > 0 && !noteIds.contains(noteId)) {
+            noteIds.append(noteId);
+        }
+    }
+    return noteIds;
+}
+
+void AppSettings::setPinnedNoteIds(const QVector<int> &noteIds)
+{
+    QStringList values;
+    for (const int noteId : noteIds) {
+        if (noteId > 0 && !values.contains(QString::number(noteId))) {
+            values.append(QString::number(noteId));
+        }
+    }
+    QSettings().setValue(QStringLiteral("session/pinnedNoteIds"), values);
+}
+
+bool AppSettings::restorePinnedNotesOnStartup() const
+{
+    return QSettings().value(QStringLiteral("general/restorePinnedNotesOnStartup"), true).toBool();
+}
+
+void AppSettings::setRestorePinnedNotesOnStartup(bool enabled)
+{
+    QSettings().setValue(QStringLiteral("general/restorePinnedNotesOnStartup"), enabled);
+}
+
 bool AppSettings::launchAtStartup() const
 {
     return QSettings().value(QStringLiteral("general/launchAtStartup"), false).toBool();

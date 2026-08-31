@@ -37,6 +37,7 @@ private:
     QSpinBox *m_noteBodyFontSizeSpin = nullptr;
     QCheckBox *m_rememberNoteWindowSizeCheck = nullptr;
     QCheckBox *m_rememberNoteWindowPositionCheck = nullptr;
+    QCheckBox *m_restorePinnedNotesCheck = nullptr;
     QCheckBox *m_startupCheck = nullptr;
     QLabel *m_statusLabel = nullptr;
 };

@@ -40,9 +40,11 @@ public:
     void refreshNotes();
     void createNoteAndFocus();
     void archiveSelectedNote();
-    void openNote(int noteId);
+    void openNote(int noteId, bool focusEditor = true);
     void saveCurrentNoteNow();
     bool isEditingNote(int noteId) const;
+    int pinnedNoteId() const;
+    void setPinned(bool pinned);
     void moveNoteWindowTo(const QPoint &position);
     void resetNoteWindowPosition();
     void setEditorOnly(bool editorOnly);

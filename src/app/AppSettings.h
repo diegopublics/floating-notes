@@ -3,6 +3,7 @@
 #include <QPoint>
 #include <QSize>
 #include <QString>
+#include <QVector>
 
 class AppSettings
 {
@@ -66,6 +67,12 @@ public:
 
     int noteBodyCursorPosition(int noteId) const;
     void setNoteBodyCursorPosition(int noteId, int position);
+
+    QVector<int> pinnedNoteIds() const;
+    void setPinnedNoteIds(const QVector<int> &noteIds);
+
+    bool restorePinnedNotesOnStartup() const;
+    void setRestorePinnedNotesOnStartup(bool enabled);
 
     bool launchAtStartup() const;
     void setLaunchAtStartup(bool enabled);

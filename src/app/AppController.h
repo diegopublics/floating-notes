@@ -34,7 +34,9 @@ private:
     void applySettings();
     void createNote();
     void archiveCurrentNote();
-    void openNote(int noteId);
+    void openNote(int noteId, bool restoringPinnedNote = false);
+    void restorePinnedNotes();
+    void saveOpenNoteState();
     void resetNoteWindowPositions();
     void showAllNotes();
     void showHelp();

@@ -51,6 +51,29 @@ const QList<QColor> HighlightColors = {
     QColor(QStringLiteral("#c7e8a4")), QColor(QStringLiteral("#f0d7a8")),
     QColor(QStringLiteral("#d7e0e9")), QColor(QStringLiteral("#e1d1bd")),
 };
+
+constexpr int QuoteBlockProperty = QTextFormat::UserProperty + 1;
+
+qreal editorFontPointSize(const QTextEdit *editor)
+{
+    const qreal pointSize = editor->font().pointSizeF();
+    if (pointSize > 0.0) {
+        return pointSize;
+    }
+
+    const qreal defaultPointSize = editor->document()->defaultFont().pointSizeF();
+    return defaultPointSize > 0.0 ? defaultPointSize : 12.0;
+}
+
+bool isHeadingFormat(const QTextCursor &cursor, qreal basePointSize)
+{
+    if (cursor.blockFormat().headingLevel() > 0) {
+        return true;
+    }
+
+    const QTextCharFormat format = cursor.charFormat();
+    return format.fontWeight() >= QFont::Bold && format.fontPointSize() >= basePointSize * 1.25;
+}
 }
 
 MarkdownEditor::MarkdownEditor(QWidget *parent)
@@ -72,7 +95,8 @@ MarkdownEditor::MarkdownEditor(QWidget *parent)
         toolbarLayout->addWidget(button);
         return button;
     };
-    addButton(QStringLiteral("H"), tr("Heading"), [this] { applyHeading(); });
+    m_headingButton = addButton(QStringLiteral("H"), tr("Heading"), [this] { applyHeading(); });
+    m_headingButton->setCheckable(true);
     m_boldButton = addButton(QStringLiteral("B"), tr("Bold"), [this] {
         QTextCharFormat format;
         format.setFontWeight(m_editor->fontWeight() >= QFont::Bold ? QFont::Normal : QFont::Bold);
@@ -138,12 +162,7 @@ MarkdownEditor::MarkdownEditor(QWidget *parent)
     addButton(QStringLiteral("*"), tr("Bulleted list"), [this] { applyList(QTextListFormat::ListDisc); });
     addButton(QStringLiteral("1."), tr("Numbered list"), [this] { applyList(QTextListFormat::ListDecimal); });
     addButton(tr("Task"), tr("Task list"), [this] { insertChecklistItem(); });
-    addButton(QStringLiteral(">"), tr("Quote"), [this] {
-        QTextCursor cursor = m_editor->textCursor();
-        QTextBlockFormat format;
-        format.setLeftMargin(18);
-        cursor.mergeBlockFormat(format);
-    });
+    addButton(QStringLiteral(">"), tr("Quote"), [this] { applyQuote(); });
     toolbarLayout->addStretch();
     layout->addWidget(toolbar);
 
@@ -264,8 +283,57 @@ void MarkdownEditor::clearCharacterProperty(int property)
 void MarkdownEditor::applyHeading()
 {
     QTextCursor cursor = m_editor->textCursor();
+    QTextBlockFormat blockFormat = cursor.blockFormat();
+    const qreal basePointSize = editorFontPointSize(m_editor);
+    const bool isHeading = isHeadingFormat(cursor, basePointSize);
+    if (isHeading) {
+        blockFormat.clearProperty(QTextFormat::HeadingLevel);
+        blockFormat.clearProperty(QTextFormat::BlockTopMargin);
+        blockFormat.clearProperty(QTextFormat::BlockBottomMargin);
+    } else {
+        blockFormat.setTopMargin(6.0);
+        blockFormat.setBottomMargin(4.0);
+    }
+    cursor.mergeBlockFormat(blockFormat);
+
+    QTextCursor blockCursor(cursor);
+    blockCursor.select(QTextCursor::BlockUnderCursor);
+    QTextCharFormat textFormat;
+    if (isHeading) {
+        textFormat.setFontPointSize(basePointSize);
+        textFormat.setFontWeight(QFont::Normal);
+    } else {
+        textFormat.setFontPointSize(basePointSize * 1.35);
+        textFormat.setFontWeight(QFont::Bold);
+    }
+    blockCursor.mergeCharFormat(textFormat);
+    m_editor->setTextCursor(cursor);
+    m_editor->setFocus(Qt::ShortcutFocusReason);
+    updateToolbarState();
+}
+
+void MarkdownEditor::applyQuote()
+{
+    QTextCursor cursor = m_editor->textCursor();
     QTextBlockFormat format = cursor.blockFormat();
-    format.setHeadingLevel(format.headingLevel() == 2 ? 0 : 2);
+    const bool isQuote = format.property(QuoteBlockProperty).toBool();
+
+    if (isQuote) {
+        format.clearProperty(QTextFormat::BlockLeftMargin);
+        format.clearProperty(QTextFormat::BlockRightMargin);
+        format.clearProperty(QTextFormat::BlockTopMargin);
+        format.clearProperty(QTextFormat::BlockBottomMargin);
+        format.clearProperty(QTextFormat::BackgroundBrush);
+        format.clearProperty(QuoteBlockProperty);
+    } else {
+        format.setLeftMargin(24.0);
+        format.setRightMargin(8.0);
+        format.setTopMargin(4.0);
+        format.setBottomMargin(4.0);
+        format.setBackground(QColor(74, 45, 57, 34));
+        format.setProperty(QuoteBlockProperty, true);
+    }
+
     cursor.mergeBlockFormat(format);
     m_editor->setTextCursor(cursor);
     m_editor->setFocus(Qt::ShortcutFocusReason);
@@ -310,6 +378,7 @@ void MarkdownEditor::insertLink()
 void MarkdownEditor::updateToolbarState()
 {
     const QTextCharFormat format = m_editor->currentCharFormat();
+    m_headingButton->setChecked(isHeadingFormat(m_editor->textCursor(), editorFontPointSize(m_editor)));
     m_boldButton->setChecked(m_editor->fontWeight() >= QFont::Bold);
     m_italicButton->setChecked(m_editor->fontItalic());
     m_strikeButton->setChecked(format.fontStrikeOut());

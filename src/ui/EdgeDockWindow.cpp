@@ -125,6 +125,17 @@ QString fanTitle(const QString &title)
     return simplified.left(MaxFanTitleCharacters) + QStringLiteral("...");
 }
 
+bool isNoteWindowGeometryAvailable(const QPoint &position, const QSize &size)
+{
+    const QRect geometry(position, size);
+    for (QScreen *screen : QGuiApplication::screens()) {
+        if (screen->availableGeometry().contains(geometry)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void drawSoftShadow(QPainter &painter, const QPainterPath &path, qreal horizontalOffset, qreal verticalOffset)
 {
     painter.setPen(Qt::NoPen);
@@ -406,7 +417,7 @@ void EdgeDockWindow::setNotesChangedCallback(std::function<void()> callback)
     m_notesChangedCallback = std::move(callback);
 }
 
-void EdgeDockWindow::openNote(int noteId)
+void EdgeDockWindow::openNote(int noteId, bool focusEditor)
 {
     refreshNotes();
     const auto noteIt = std::find_if(m_notes.cbegin(), m_notes.cend(), [noteId](const Note &note) {
@@ -421,7 +432,9 @@ void EdgeDockWindow::openNote(int noteId)
     setExpanded(true);
     updateEditorFromCurrentNote();
     updateColorButtons();
-    m_bodyEdit->focusEditor(Qt::MouseFocusReason);
+    if (focusEditor) {
+        m_bodyEdit->focusEditor(Qt::MouseFocusReason);
+    }
 }
 
 bool EdgeDockWindow::isEditingNote(int noteId) const
@@ -430,6 +443,18 @@ bool EdgeDockWindow::isEditingNote(int noteId) const
         && m_currentNoteIndex >= 0
         && m_currentNoteIndex < m_notes.size()
         && m_notes.at(m_currentNoteIndex).id == noteId;
+}
+
+int EdgeDockWindow::pinnedNoteId() const
+{
+    return m_editorOnly && m_keepOpen ? currentNoteId() : 0;
+}
+
+void EdgeDockWindow::setPinned(bool pinned)
+{
+    if (m_editorVisible) {
+        m_pinButton->setChecked(pinned);
+    }
 }
 
 void EdgeDockWindow::moveNoteWindowTo(const QPoint &position)
@@ -556,21 +581,68 @@ void EdgeDockWindow::paintEvent(QPaintEvent *)
     const QRectF sheet = onRight
         ? QRectF(EditorShadowMargin + EditorGutterWidth, EditorShadowMargin, width() - EditorGutterWidth - 2 * EditorShadowMargin, height() - 2 * EditorShadowMargin)
         : QRectF(EditorShadowMargin, EditorShadowMargin, width() - EditorGutterWidth - 2 * EditorShadowMargin, height() - 2 * EditorShadowMargin);
-    QPainterPath path; constexpr qreal radius = 14.0;
+    const QRectF gutter = onRight
+        ? QRectF(EditorShadowMargin, EditorShadowMargin, EditorGutterWidth, sheet.height())
+        : QRectF(width() - EditorShadowMargin - EditorGutterWidth, EditorShadowMargin, EditorGutterWidth, sheet.height());
+    const QRectF noteWindow = onRight
+        ? QRectF(gutter.left(), sheet.top(), sheet.right() - gutter.left(), sheet.height())
+        : QRectF(sheet.left(), sheet.top(), gutter.right() - sheet.left(), sheet.height());
+
+    // The paper remains rectangular; only the exposed edge of the vertical title tab is rounded.
+    QPainterPath noteWindowPath;
+    constexpr qreal radius = 14.0;
     if (onRight) {
-        path.moveTo(sheet.left() + radius, sheet.top()); path.lineTo(sheet.right(), sheet.top()); path.lineTo(sheet.right(), sheet.bottom()); path.lineTo(sheet.left() + radius, sheet.bottom());
-        path.quadTo(sheet.left(), sheet.bottom(), sheet.left(), sheet.bottom() - radius); path.lineTo(sheet.left(), sheet.top() + radius); path.quadTo(sheet.left(), sheet.top(), sheet.left() + radius, sheet.top());
+        noteWindowPath.moveTo(noteWindow.left() + radius, noteWindow.top());
+        noteWindowPath.lineTo(noteWindow.right(), noteWindow.top());
+        noteWindowPath.lineTo(noteWindow.right(), noteWindow.bottom());
+        noteWindowPath.lineTo(noteWindow.left() + radius, noteWindow.bottom());
+        noteWindowPath.quadTo(noteWindow.left(), noteWindow.bottom(), noteWindow.left(), noteWindow.bottom() - radius);
+        noteWindowPath.lineTo(noteWindow.left(), noteWindow.top() + radius);
+        noteWindowPath.quadTo(noteWindow.left(), noteWindow.top(), noteWindow.left() + radius, noteWindow.top());
     } else {
-        path.moveTo(sheet.left(), sheet.top()); path.lineTo(sheet.right() - radius, sheet.top()); path.quadTo(sheet.right(), sheet.top(), sheet.right(), sheet.top() + radius);
-        path.lineTo(sheet.right(), sheet.bottom() - radius); path.quadTo(sheet.right(), sheet.bottom(), sheet.right() - radius, sheet.bottom()); path.lineTo(sheet.left(), sheet.bottom());
+        noteWindowPath.moveTo(noteWindow.left(), noteWindow.top());
+        noteWindowPath.lineTo(noteWindow.right() - radius, noteWindow.top());
+        noteWindowPath.quadTo(noteWindow.right(), noteWindow.top(), noteWindow.right(), noteWindow.top() + radius);
+        noteWindowPath.lineTo(noteWindow.right(), noteWindow.bottom() - radius);
+        noteWindowPath.quadTo(noteWindow.right(), noteWindow.bottom(), noteWindow.right() - radius, noteWindow.bottom());
+        noteWindowPath.lineTo(noteWindow.left(), noteWindow.bottom());
     }
-    path.closeSubpath(); drawAllSideShadow(painter, path); painter.setPen(Qt::NoPen); painter.setBrush(paper); painter.drawPath(path);
-    const QRect gutter = onRight ? QRect(EditorShadowMargin, EditorShadowMargin, EditorGutterWidth, static_cast<int>(sheet.height())) : QRect(width() - EditorShadowMargin - EditorGutterWidth, EditorShadowMargin, EditorGutterWidth, static_cast<int>(sheet.height())); painter.fillRect(gutter, QColor(dash.red(), dash.green(), dash.blue(), 96));
-    const int lineX = onRight ? EditorShadowMargin + EditorGutterWidth : width() - EditorShadowMargin - EditorGutterWidth - 1; const QColor ink = inkColor(paperName); painter.setPen(QPen(QColor(ink.red(), ink.green(), ink.blue(), 72), 1, Qt::DashLine)); painter.drawLine(lineX, EditorShadowMargin, lineX, height() - EditorShadowMargin);
+    noteWindowPath.closeSubpath();
+    drawAllSideShadow(painter, noteWindowPath);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(paper);
+    painter.drawRect(sheet);
+
+    QPainterPath gutterPath;
+    if (onRight) {
+        gutterPath.moveTo(gutter.left() + radius, gutter.top());
+        gutterPath.lineTo(gutter.right(), gutter.top());
+        gutterPath.lineTo(gutter.right(), gutter.bottom());
+        gutterPath.lineTo(gutter.left() + radius, gutter.bottom());
+        gutterPath.quadTo(gutter.left(), gutter.bottom(), gutter.left(), gutter.bottom() - radius);
+        gutterPath.lineTo(gutter.left(), gutter.top() + radius);
+        gutterPath.quadTo(gutter.left(), gutter.top(), gutter.left() + radius, gutter.top());
+    } else {
+        gutterPath.moveTo(gutter.left(), gutter.top());
+        gutterPath.lineTo(gutter.right() - radius, gutter.top());
+        gutterPath.quadTo(gutter.right(), gutter.top(), gutter.right(), gutter.top() + radius);
+        gutterPath.lineTo(gutter.right(), gutter.bottom() - radius);
+        gutterPath.quadTo(gutter.right(), gutter.bottom(), gutter.right() - radius, gutter.bottom());
+        gutterPath.lineTo(gutter.left(), gutter.bottom());
+    }
+    gutterPath.closeSubpath();
+    painter.setBrush(QColor(dash.red(), dash.green(), dash.blue(), 96));
+    painter.drawPath(gutterPath);
+
+    const int lineX = onRight ? static_cast<int>(gutter.right()) : static_cast<int>(gutter.left()) - 1;
+    const QColor ink = inkColor(paperName);
+    painter.setPen(QPen(QColor(ink.red(), ink.green(), ink.blue(), 72), 1, Qt::DashLine));
+    painter.drawLine(lineX, EditorShadowMargin, lineX, height() - EditorShadowMargin);
     painter.save(); painter.translate(gutter.center().x(), gutter.center().y()); painter.rotate(onRight ? 90 : -90); painter.setFont(noteFont(m_settings->noteFont(), 10, QFont::DemiBold));
     const QRect gutterTitleRect(-gutter.height() / 2 + 16, -EditorGutterWidth / 2, gutter.height() - 32, EditorGutterWidth);
     const QString gutterTitle = note.title.simplified().toUpper();
-    painter.setPen(QColor(39, 23, 31, 190)); painter.drawText(gutterTitleRect.translated(1, 1), Qt::AlignCenter, gutterTitle);
+    painter.setPen(QColor(28, 15, 22, 70)); painter.drawText(gutterTitleRect.translated(2, 2), Qt::AlignCenter, gutterTitle);
+    painter.setPen(QColor(28, 15, 22, 150)); painter.drawText(gutterTitleRect.translated(1, 1), Qt::AlignCenter, gutterTitle);
     painter.setPen(QColor(255, 252, 247, 238)); painter.drawText(gutterTitleRect, Qt::AlignCenter, gutterTitle); painter.restore();
     if (m_editorOnly) {
         painter.setPen(QPen(QColor(ink.red(), ink.green(), ink.blue(), 120), 1));
@@ -872,12 +944,16 @@ void EdgeDockWindow::prepareNoteWindowGeometry()
     }
 
     if (m_settings->rememberNoteWindowPosition() && noteId > 0 && m_settings->hasNoteWindowPosition(noteId)) {
-        m_noteWindowPosition = m_settings->noteWindowPosition(noteId);
-        m_hasNoteWindowPosition = true;
-    } else {
-        m_noteWindowPosition = defaultNoteWindowPosition(noteWindowSize());
-        m_hasNoteWindowPosition = true;
+        const QPoint savedPosition = m_settings->noteWindowPosition(noteId);
+        if (isNoteWindowGeometryAvailable(savedPosition, noteWindowSize())) {
+            m_noteWindowPosition = savedPosition;
+            m_hasNoteWindowPosition = true;
+            return;
+        }
     }
+
+    m_noteWindowPosition = defaultNoteWindowPosition(noteWindowSize());
+    m_hasNoteWindowPosition = true;
 }
 bool EdgeDockWindow::isNoteWindowDragHandle(const QPoint &position) const
 {

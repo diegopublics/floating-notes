@@ -21,7 +21,7 @@ SettingsDialog::SettingsDialog(AppSettings *settings,
     , m_settingsChangedCallback(std::move(settingsChangedCallback))
 {
     setWindowTitle(tr("Settings"));
-    resize(390, 380);
+    resize(390, 410);
     buildUi();
     loadSettings();
 }
@@ -79,6 +79,9 @@ void SettingsDialog::buildUi()
     m_rememberNoteWindowPositionCheck = new QCheckBox(tr("Remember note window position"), this);
     formLayout->addRow(QString(), m_rememberNoteWindowPositionCheck);
 
+    m_restorePinnedNotesCheck = new QCheckBox(tr("Restore pinned notes on startup"), this);
+    formLayout->addRow(QString(), m_restorePinnedNotesCheck);
+
     m_startupCheck = new QCheckBox(tr("Launch when Windows starts"), this);
     formLayout->addRow(QString(), m_startupCheck);
 
@@ -109,6 +112,7 @@ void SettingsDialog::loadSettings()
     m_noteBodyFontSizeSpin->setValue(m_settings->noteBodyFontSize());
     m_rememberNoteWindowSizeCheck->setChecked(m_settings->rememberNoteWindowSize());
     m_rememberNoteWindowPositionCheck->setChecked(m_settings->rememberNoteWindowPosition());
+    m_restorePinnedNotesCheck->setChecked(m_settings->restorePinnedNotesOnStartup());
     m_startupCheck->setChecked(m_settings->launchAtStartup());
 }
 
@@ -125,6 +129,10 @@ void SettingsDialog::applySettings()
     m_settings->setNoteBodyFontSize(m_noteBodyFontSizeSpin->value());
     m_settings->setRememberNoteWindowSize(m_rememberNoteWindowSizeCheck->isChecked());
     m_settings->setRememberNoteWindowPosition(m_rememberNoteWindowPositionCheck->isChecked());
+    m_settings->setRestorePinnedNotesOnStartup(m_restorePinnedNotesCheck->isChecked());
+    if (!m_restorePinnedNotesCheck->isChecked()) {
+        m_settings->setPinnedNoteIds({});
+    }
 
     const bool startupEnabled = m_startupCheck->isChecked();
     QString errorMessage;
