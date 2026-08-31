@@ -61,7 +61,7 @@ target_link_libraries(FloatingNotes
 )
 
 if(WIN32)
-    target_link_libraries(FloatingNotes PRIVATE user32)
+    target_link_libraries(FloatingNotes PRIVATE ole32 shell32 user32)
 endif()
 
 target_include_directories(FloatingNotes

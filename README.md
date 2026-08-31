@@ -1,6 +1,18 @@
 # Floating Notes
 
+[English](README.md) | [Español](README.es.md)
+
 Floating Notes is a small, native desktop utility for keeping local notes close to the edge of the screen. It is designed to stay lightweight, launch quickly, and work entirely offline.
+
+## Run on Windows
+
+The `FloatingNotes.7z` release archive contains the complete portable application, including the executable and its required runtime files.
+
+1. Install [7-Zip](https://www.7-zip.org/) if it is not already available.
+2. Extract `FloatingNotes.7z` to `C:\FloatingNotes`, or to any folder you prefer.
+3. Open the extracted folder and run `FloatingNotes.exe`.
+
+No installer is required. Keep all extracted files together in the same folder while using the application.
 
 ## Current Features
 
