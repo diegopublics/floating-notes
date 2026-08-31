@@ -18,6 +18,7 @@ public:
     ~NoteRepository();
 
     bool open(QString *errorMessage = nullptr);
+    bool createDailyBackup(QString *errorMessage = nullptr) const;
     bool createNote(Note *createdNote, QString *errorMessage = nullptr) const;
     bool importNote(const Note &note, Note *createdNote = nullptr, QString *errorMessage = nullptr) const;
     QVector<Note> loadNotes(NoteListFilter filter = NoteListFilter::Active,

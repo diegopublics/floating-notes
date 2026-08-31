@@ -13,6 +13,8 @@ class QSpinBox;
 
 class SettingsDialog final : public QDialog
 {
+    Q_OBJECT
+
 public:
     explicit SettingsDialog(AppSettings *settings,
                             std::function<void()> settingsChangedCallback,
@@ -26,6 +28,7 @@ private:
 
     AppSettings *m_settings = nullptr;
     std::function<void()> m_settingsChangedCallback;
+    QComboBox *m_languageCombo = nullptr;
     QComboBox *m_edgeCombo = nullptr;
     QSpinBox *m_maxVisibleSpin = nullptr;
     QSpinBox *m_animationSpin = nullptr;

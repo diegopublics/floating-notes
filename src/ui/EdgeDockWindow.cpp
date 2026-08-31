@@ -1,6 +1,7 @@
 #include "EdgeDockWindow.h"
 
 #include "app/AppSettings.h"
+#include "AppIcons.h"
 #include "MarkdownEditor.h"
 
 #include <QApplication>
@@ -13,6 +14,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -238,6 +240,8 @@ EdgeDockWindow::EdgeDockWindow(NoteRepository *repository, AppSettings *settings
       m_hideCallback(std::move(hideCallback))
 {
     setWindowTitle(QStringLiteral("Floating Notes"));
+    setObjectName(QStringLiteral("edgeDockWindow"));
+    setStyleSheet(QStringLiteral("QWidget#edgeDockWindow { background: transparent; }"));
     setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_TranslucentBackground);
     m_noteWindowContentSize = QSize(DefaultEditorWidth, DefaultEditorHeight);
@@ -291,44 +295,55 @@ void EdgeDockWindow::buildContent()
     m_moreButton = new QPushButton(this);
     m_moreButton->setFixedSize(TabWidth, 34); m_moreButton->setCursor(Qt::PointingHandCursor); m_moreButton->hide();
     connect(m_moreButton, &QPushButton::clicked, this, [this] { if (m_allNotesCallback) m_allNotesCallback(); });
-    m_createButton = new QPushButton(QStringLiteral("+"), this);
+    m_createButton = new QPushButton(this);
     m_createButton->setFixedSize(PlusButtonSize, PlusButtonSize); m_createButton->setCursor(Qt::PointingHandCursor);
+    AppIcons::setButtonIcon(m_createButton, AppIcons::Icon::Create, tr("Create note"));
     connect(m_createButton, &QPushButton::clicked, this, &EdgeDockWindow::createNoteAndFocus);
 
-    m_editorPanel = new QWidget(this); m_editorPanel->hide();
+    m_editorPanel = new QWidget(this); m_editorPanel->setObjectName(QStringLiteral("noteEditorPanel")); m_editorPanel->hide();
     auto *layout = new QVBoxLayout(m_editorPanel);
     layout->setContentsMargins(16, 8, 16, 12); layout->setSpacing(2);
     auto *header = new QHBoxLayout; header->setContentsMargins(0, 0, 0, 0); header->setSpacing(8);
-    m_titleEdit = new QLineEdit(m_editorPanel); m_titleEdit->setPlaceholderText(QStringLiteral("New note"));
-    connect(m_titleEdit, &QLineEdit::textChanged, this, &EdgeDockWindow::scheduleSave); header->addWidget(m_titleEdit, 1);
+    m_titleEdit = new QLineEdit(m_editorPanel); m_titleEdit->setPlaceholderText(tr("New note"));
+    connect(m_titleEdit, &QLineEdit::textChanged, this, [this](const QString &title) {
+        if (!m_loadingEditor && m_currentNoteIndex >= 0 && m_currentNoteIndex < m_notes.size()) {
+            const QString trimmedTitle = title.trimmed();
+            m_notes[m_currentNoteIndex].title = trimmedTitle.isEmpty() ? tr("Untitled") : trimmedTitle;
+            updateNoteButtons();
+            update();
+        }
+        scheduleSave();
+    });
+    header->addWidget(m_titleEdit, 1);
     m_statusLabel = new QLabel(m_editorPanel); m_statusLabel->setMinimumWidth(88); m_statusLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter); header->addWidget(m_statusLabel);
-    m_historyUndoButton = new QPushButton(QStringLiteral("Undo"), m_editorPanel);
-    m_historyUndoButton->setToolTip(QStringLiteral("Restore the previous saved version"));
+    m_historyUndoButton = new QPushButton(m_editorPanel);
+    m_historyUndoButton->setFixedSize(26, 24);
+    AppIcons::setButtonIcon(m_historyUndoButton, AppIcons::Icon::Undo, tr("Restore the previous saved version"));
     connect(m_historyUndoButton, &QPushButton::clicked, this, &EdgeDockWindow::undoCurrentNote);
     header->addWidget(m_historyUndoButton);
-    m_historyRedoButton = new QPushButton(QStringLiteral("Redo"), m_editorPanel);
-    m_historyRedoButton->setToolTip(QStringLiteral("Restore the next saved version"));
+    m_historyRedoButton = new QPushButton(m_editorPanel);
+    m_historyRedoButton->setFixedSize(26, 24);
+    AppIcons::setButtonIcon(m_historyRedoButton, AppIcons::Icon::Redo, tr("Restore the next saved version"));
     connect(m_historyRedoButton, &QPushButton::clicked, this, &EdgeDockWindow::redoCurrentNote);
     header->addWidget(m_historyRedoButton);
-    m_pinButton = new QPushButton(QStringLiteral("Pin"), m_editorPanel);
+    m_pinButton = new QPushButton(m_editorPanel);
+    m_pinButton->setFixedSize(26, 24);
+    AppIcons::setButtonIcon(m_pinButton, AppIcons::Icon::Pin, tr("Keep this note open"));
     m_pinButton->setCheckable(true);
-    m_pinButton->setToolTip(QStringLiteral("Keep this note open"));
     connect(m_pinButton, &QPushButton::toggled, this, [this](bool pinned) {
         m_keepOpen = pinned;
-        m_pinButton->setText(pinned ? QStringLiteral("Unpin") : QStringLiteral("Pin"));
-        m_pinButton->setToolTip(pinned ? QStringLiteral("Allow this note to close automatically") : QStringLiteral("Keep this note open"));
+        m_pinButton->setToolTip(pinned ? tr("Allow this note to close automatically") : tr("Keep this note open"));
+        m_pinButton->setAccessibleName(pinned ? tr("Unpin note") : tr("Pin note"));
         if (pinned) {
             m_collapseTimer->stop();
         }
     });
     header->addWidget(m_pinButton);
-    m_checklistButton = new QPushButton(QStringLiteral("☷"), m_editorPanel); m_checklistButton->setToolTip(QStringLiteral("Insert checklist item"));
-    connect(m_checklistButton, &QPushButton::clicked, this, &EdgeDockWindow::insertChecklistLine); header->addWidget(m_checklistButton);
-    m_allNotesButton = new QPushButton(QStringLiteral("⌕"), m_editorPanel); m_allNotesButton->setToolTip(QStringLiteral("All notes"));
+    m_allNotesButton = new QPushButton(m_editorPanel); m_allNotesButton->setFixedSize(26, 24); AppIcons::setButtonIcon(m_allNotesButton, AppIcons::Icon::AllNotes, tr("All notes"));
     connect(m_allNotesButton, &QPushButton::clicked, this, [this] { if (m_allNotesCallback) m_allNotesCallback(); }); header->addWidget(m_allNotesButton);
     layout->addLayout(header);
     m_tagsEdit = new QLineEdit(m_editorPanel); m_tagsEdit->hide(); connect(m_tagsEdit, &QLineEdit::textChanged, this, &EdgeDockWindow::scheduleSave);
-    m_bodyEdit = new MarkdownEditor(m_editorPanel); m_bodyEdit->setPlaceholderText(QStringLiteral("Write a note..."));
+    m_bodyEdit = new MarkdownEditor(m_editorPanel); m_bodyEdit->setObjectName(QStringLiteral("noteBodyEditor")); m_bodyEdit->setPlaceholderText(tr("Write a note..."));
     connect(m_bodyEdit, &MarkdownEditor::textChanged, this, &EdgeDockWindow::scheduleSave); layout->addWidget(m_bodyEdit, 1);
     connect(m_bodyEdit, &MarkdownEditor::cursorPositionChanged, this, [this] {
         if (!m_loadingEditor && m_currentNoteIndex >= 0 && m_currentNoteIndex < m_notes.size()) {
@@ -341,11 +356,11 @@ void EdgeDockWindow::buildContent()
         connect(button, &QPushButton::clicked, this, [this, color] { updateNoteColor(color); }); m_colorButtons.append(button); footer->addWidget(button);
     }
     footer->addStretch();
-    m_archiveButton = new QPushButton(QStringLiteral("Archive"), m_editorPanel); connect(m_archiveButton, &QPushButton::clicked, this, &EdgeDockWindow::archiveSelectedNote); footer->addWidget(m_archiveButton);
-    m_deleteButton = new QPushButton(QStringLiteral("Delete"), m_editorPanel); connect(m_deleteButton, &QPushButton::clicked, this, &EdgeDockWindow::deleteCurrentNote); footer->addWidget(m_deleteButton);
-    m_hideButton = new QPushButton(QStringLiteral("Close"), m_editorPanel); connect(m_hideButton, &QPushButton::clicked, this, [this] { setExpanded(false); }); footer->addWidget(m_hideButton);
+    m_archiveButton = new QPushButton(m_editorPanel); m_archiveButton->setFixedSize(26, 24); AppIcons::setButtonIcon(m_archiveButton, AppIcons::Icon::Archive, tr("Archive note")); connect(m_archiveButton, &QPushButton::clicked, this, &EdgeDockWindow::archiveSelectedNote); footer->addWidget(m_archiveButton);
+    m_deleteButton = new QPushButton(m_editorPanel); m_deleteButton->setFixedSize(26, 24); AppIcons::setButtonIcon(m_deleteButton, AppIcons::Icon::Delete, tr("Delete note")); connect(m_deleteButton, &QPushButton::clicked, this, &EdgeDockWindow::deleteCurrentNote); footer->addWidget(m_deleteButton);
+    m_hideButton = new QPushButton(m_editorPanel); m_hideButton->setFixedSize(26, 24); AppIcons::setButtonIcon(m_hideButton, AppIcons::Icon::Close, tr("Close note")); connect(m_hideButton, &QPushButton::clicked, this, [this] { setExpanded(false); }); footer->addWidget(m_hideButton);
     layout->addLayout(footer);
-    m_undoButton = new QPushButton(QStringLiteral("Undo delete"), m_editorPanel); m_undoButton->hide(); connect(m_undoButton, &QPushButton::clicked, this, &EdgeDockWindow::undoDelete);
+    m_undoButton = new QPushButton(m_editorPanel); m_undoButton->setFixedSize(26, 24); AppIcons::setButtonIcon(m_undoButton, AppIcons::Icon::Undo, tr("Undo delete")); m_undoButton->hide(); connect(m_undoButton, &QPushButton::clicked, this, &EdgeDockWindow::undoDelete);
 }
 
 void EdgeDockWindow::applySettings()
@@ -552,7 +567,11 @@ void EdgeDockWindow::paintEvent(QPaintEvent *)
     path.closeSubpath(); drawAllSideShadow(painter, path); painter.setPen(Qt::NoPen); painter.setBrush(paper); painter.drawPath(path);
     const QRect gutter = onRight ? QRect(EditorShadowMargin, EditorShadowMargin, EditorGutterWidth, static_cast<int>(sheet.height())) : QRect(width() - EditorShadowMargin - EditorGutterWidth, EditorShadowMargin, EditorGutterWidth, static_cast<int>(sheet.height())); painter.fillRect(gutter, QColor(dash.red(), dash.green(), dash.blue(), 96));
     const int lineX = onRight ? EditorShadowMargin + EditorGutterWidth : width() - EditorShadowMargin - EditorGutterWidth - 1; const QColor ink = inkColor(paperName); painter.setPen(QPen(QColor(ink.red(), ink.green(), ink.blue(), 72), 1, Qt::DashLine)); painter.drawLine(lineX, EditorShadowMargin, lineX, height() - EditorShadowMargin);
-    painter.save(); painter.translate(gutter.center().x(), gutter.center().y()); painter.rotate(onRight ? 90 : -90); painter.setFont(noteFont(m_settings->noteFont(), 10, QFont::DemiBold)); painter.setPen(QColor(ink.red(), ink.green(), ink.blue(), 170)); painter.drawText(QRect(-gutter.height() / 2 + 16, -EditorGutterWidth / 2, gutter.height() - 32, EditorGutterWidth), Qt::AlignCenter, note.title.simplified().toUpper()); painter.restore();
+    painter.save(); painter.translate(gutter.center().x(), gutter.center().y()); painter.rotate(onRight ? 90 : -90); painter.setFont(noteFont(m_settings->noteFont(), 10, QFont::DemiBold));
+    const QRect gutterTitleRect(-gutter.height() / 2 + 16, -EditorGutterWidth / 2, gutter.height() - 32, EditorGutterWidth);
+    const QString gutterTitle = note.title.simplified().toUpper();
+    painter.setPen(QColor(39, 23, 31, 190)); painter.drawText(gutterTitleRect.translated(1, 1), Qt::AlignCenter, gutterTitle);
+    painter.setPen(QColor(255, 252, 247, 238)); painter.drawText(gutterTitleRect, Qt::AlignCenter, gutterTitle); painter.restore();
     if (m_editorOnly) {
         painter.setPen(QPen(QColor(ink.red(), ink.green(), ink.blue(), 120), 1));
         const int handleX = onRight ? EditorShadowMargin + 5 : width() - EditorShadowMargin - EditorGutterWidth + 6;
@@ -615,6 +634,12 @@ void EdgeDockWindow::createNoteAndFocus()
 void EdgeDockWindow::archiveSelectedNote()
 {
     if (m_currentNoteIndex < 0 || m_currentNoteIndex >= m_notes.size()) return;
+    const Note &note = m_notes.at(m_currentNoteIndex);
+    if (QMessageBox::question(this,
+                              tr("Archive note"),
+                              tr("Archive \"%1\"?").arg(note.title),
+                              QMessageBox::Yes | QMessageBox::No,
+                              QMessageBox::No) != QMessageBox::Yes) return;
     saveCurrentNote(); QString errorMessage;
     if (!m_repository->archiveNote(m_notes.at(m_currentNoteIndex).id, &errorMessage)) { setStatusText(QStringLiteral("Archive error: %1").arg(errorMessage)); return; }
     m_notes.removeAt(m_currentNoteIndex); m_currentNoteIndex = -1; setExpanded(false); updateNoteButtons();
@@ -623,6 +648,12 @@ void EdgeDockWindow::archiveSelectedNote()
 void EdgeDockWindow::deleteCurrentNote()
 {
     if (m_currentNoteIndex < 0 || m_currentNoteIndex >= m_notes.size()) return;
+    const Note &note = m_notes.at(m_currentNoteIndex);
+    if (QMessageBox::question(this,
+                              tr("Delete note"),
+                              tr("Delete \"%1\"?").arg(note.title),
+                              QMessageBox::Yes | QMessageBox::No,
+                              QMessageBox::No) != QMessageBox::Yes) return;
     finalizePendingDelete(); saveCurrentNote(); const int index = m_currentNoteIndex; m_pendingDeleteNoteId = m_notes.at(index).id; QString errorMessage;
     if (!m_repository->markNoteDeleted(m_pendingDeleteNoteId, &errorMessage)) { setStatusText(QStringLiteral("Delete error: %1").arg(errorMessage)); m_pendingDeleteNoteId = 0; return; }
     m_notes.removeAt(index); m_currentNoteIndex = -1; m_undoButton->show(); m_deleteUndoTimer->start(); setExpanded(false); updateNoteButtons();
@@ -661,11 +692,6 @@ void EdgeDockWindow::finalizePendingDelete()
 {
     if (m_pendingDeleteNoteId == 0) return;
     const int id = m_pendingDeleteNoteId; m_pendingDeleteNoteId = 0; m_deleteUndoTimer->stop(); m_undoButton->hide(); QString errorMessage; m_repository->deleteNotePermanently(id, &errorMessage);
-}
-void EdgeDockWindow::insertChecklistLine()
-{
-    if (m_currentNoteIndex < 0 || m_currentNoteIndex >= m_notes.size()) return;
-    m_bodyEdit->insertChecklistItem(); scheduleSave();
 }
 void EdgeDockWindow::scheduleSave()
 {
@@ -771,7 +797,7 @@ void EdgeDockWindow::updateContentVisibility()
 void EdgeDockWindow::updateEditorFromCurrentNote()
 {
     m_loadingEditor = true; const bool hasNote = m_currentNoteIndex >= 0 && m_currentNoteIndex < m_notes.size();
-    for (QWidget *widget : {static_cast<QWidget *>(m_titleEdit), static_cast<QWidget *>(m_bodyEdit), static_cast<QWidget *>(m_archiveButton), static_cast<QWidget *>(m_deleteButton), static_cast<QWidget *>(m_checklistButton), static_cast<QWidget *>(m_pinButton)}) widget->setEnabled(hasNote);
+    for (QWidget *widget : {static_cast<QWidget *>(m_titleEdit), static_cast<QWidget *>(m_bodyEdit), static_cast<QWidget *>(m_archiveButton), static_cast<QWidget *>(m_deleteButton), static_cast<QWidget *>(m_pinButton)}) widget->setEnabled(hasNote);
     for (QPushButton *button : m_colorButtons) button->setEnabled(hasNote);
     if (hasNote) {
         const Note &note = m_notes.at(m_currentNoteIndex); m_titleEdit->setText(note.title); m_tagsEdit->setText(note.tags); m_bodyEdit->setMarkdown(note.body);
@@ -779,7 +805,7 @@ void EdgeDockWindow::updateEditorFromCurrentNote()
         cursor.setPosition(std::clamp(m_bodyCursorPositions.value(note.id, m_settings->noteBodyCursorPosition(note.id)), 0, m_bodyEdit->characterCount() - 1));
         m_bodyEdit->setTextCursor(cursor);
         const QColor ink = inkColor(paperColor(note.color));
-        m_editorPanel->setStyleSheet(QStringLiteral("QLineEdit, QPlainTextEdit, QTextEdit { background: transparent; border: 0; color: %1; selection-background-color: rgba(74,45,57,185); selection-color: #fff8f1; } QLineEdit { padding: 2px 0; } QPlainTextEdit, QTextEdit { padding: 9px 8px; } QFrame#markdownToolbar { background: rgba(61,36,47,16); border-bottom: 1px solid rgba(61,36,47,38); } QToolButton { background: transparent; border: 0; border-radius: 4px; color: %1; padding: 1px; font-size: 10px; } QToolButton:hover, QToolButton:checked { background: rgba(61,36,47,48); } QLabel { color: rgba(%2,%3,%4,130); font-size: 10px; } QPushButton { background: rgba(61,36,47,22); border: 0; border-radius: 6px; color: %1; padding: 3px 9px; font-size: 11px; } QPushButton:hover { background: rgba(61,36,47,42); }").arg(ink.name()).arg(ink.red()).arg(ink.green()).arg(ink.blue()));
+        m_editorPanel->setStyleSheet(QStringLiteral("QWidget#noteEditorPanel, QWidget#noteBodyEditor, QLabel { background: transparent; } QLineEdit, QPlainTextEdit, QTextEdit { background: transparent; border: 0; color: %1; selection-background-color: rgba(74,45,57,185); selection-color: #fff8f1; } QLineEdit { padding: 2px 0; } QPlainTextEdit, QTextEdit { padding: 9px 8px; } QFrame#markdownToolbar { background: rgba(61,36,47,16); border-bottom: 1px solid rgba(61,36,47,38); } QToolButton { background: transparent; border: 0; border-radius: 4px; color: %1; padding: 1px; font-size: 10px; } QToolButton:hover, QToolButton:checked { background: rgba(61,36,47,48); } QLabel { color: rgba(%2,%3,%4,130); font-size: 10px; } QPushButton { background: rgba(61,36,47,22); border: 0; border-radius: 6px; color: %1; padding: 3px 9px; font-size: 11px; } QPushButton:hover { background: rgba(61,36,47,42); } QPushButton:checked { background: rgba(255,255,255,132); border: 1px solid rgba(61,36,47,112); }").arg(ink.name()).arg(ink.red()).arg(ink.green()).arg(ink.blue()));
         setStatusText(QStringLiteral("Saved · just now"));
     } else { m_titleEdit->clear(); m_tagsEdit->clear(); m_bodyEdit->setMarkdown({}); }
     m_loadingEditor = false;

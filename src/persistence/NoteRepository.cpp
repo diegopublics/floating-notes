@@ -1,7 +1,9 @@
 #include "NoteRepository.h"
 
 #include <QCoreApplication>
+#include <QDate>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QSqlDatabase>
 #include <QSqlError>
@@ -80,6 +82,53 @@ bool NoteRepository::open(QString *errorMessage)
     }
 
     return ensureSchema(errorMessage) && seedIfEmpty(errorMessage);
+}
+
+bool NoteRepository::createDailyBackup(QString *errorMessage) const
+{
+    const QString sourcePath = databasePath();
+    const QFileInfo sourceInfo(sourcePath);
+    if (!sourceInfo.exists()) {
+        setError(errorMessage, QStringLiteral("The notes database does not exist."));
+        return false;
+    }
+
+    const QString dataDirectoryPath = sourceInfo.absolutePath();
+    const QString backupDirectoryPath = QDir::cleanPath(dataDirectoryPath + QLatin1String("/backups"));
+    QDir backupDirectory(backupDirectoryPath);
+    if (!backupDirectory.exists() && !backupDirectory.mkpath(QStringLiteral("."))) {
+        setError(errorMessage, QStringLiteral("Could not create the backup directory."));
+        return false;
+    }
+
+    const QString backupName = QStringLiteral("notes-%1.sqlite").arg(QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd")));
+    const QString backupPath = QDir::cleanPath(backupDirectoryPath + QLatin1Char('/') + backupName);
+    const QString legacyBackupPath = QDir::cleanPath(dataDirectoryPath + QLatin1Char('/') + backupName);
+    if (QFile::exists(legacyBackupPath) && !QFile::exists(backupPath)
+        && !QFile::rename(legacyBackupPath, backupPath)) {
+        setError(errorMessage, QStringLiteral("Could not move the database backup into its backup directory."));
+        return false;
+    }
+
+    if (!QFile::exists(backupPath)) {
+        QString quotedPath = backupPath;
+        const QString sql = QStringLiteral("VACUUM INTO '%1'").arg(quotedPath.replace(QLatin1Char('\''), QStringLiteral("''")));
+        QSqlQuery query(QSqlDatabase::database(m_connectionName));
+        if (!query.exec(sql)) {
+            setError(errorMessage, query.lastError().text());
+            return false;
+        }
+    }
+
+    const QFileInfoList backups = backupDirectory.entryInfoList({QStringLiteral("notes-*.sqlite")}, QDir::Files, QDir::Time);
+    for (qsizetype index = 15; index < backups.size(); ++index) {
+        if (!QFile::remove(backups.at(index).absoluteFilePath())) {
+            setError(errorMessage, QStringLiteral("Could not remove an old database backup."));
+            return false;
+        }
+    }
+
+    return true;
 }
 
 QVector<Note> NoteRepository::loadNotes(NoteListFilter filter, const QString &searchText, QString *errorMessage) const

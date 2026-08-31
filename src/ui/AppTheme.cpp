@@ -17,8 +17,9 @@ QString AppTheme::applicationStyleSheet(AppSettings::Theme theme)
             "QLineEdit, QPlainTextEdit, QTextEdit, QListWidget, QComboBox {"
             "  background: #302e29; color: #f2eee6; border: 1px solid #5a544a; border-radius: 6px; padding: 6px;"
             "}"
-            "QPushButton { background: #343129; color: #f2eee6; border: 1px solid #5a544a; border-radius: 6px; padding: 6px 10px; }"
-            "QPushButton:hover { background: #403b32; }");
+            "QPushButton, QToolButton { background: #f2eee6; color: #26231d; border: 1px solid #cfc7bb; border-radius: 6px; padding: 6px 10px; }"
+            "QPushButton:hover, QToolButton:hover { background: #fffdf8; }"
+            "QPushButton:disabled, QToolButton:disabled { background: #817b72; color: #403b32; border-color: #817b72; }");
     }
 
     return QStringLiteral(

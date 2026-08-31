@@ -91,6 +91,26 @@ AppSettings::NoteFont noteFontFromString(const QString &value)
     }
     return AppSettings::NoteFont::Playful;
 }
+
+QString languageToString(AppSettings::Language language)
+{
+    return language == AppSettings::Language::Spanish ? QStringLiteral("es") : QStringLiteral("en");
+}
+
+AppSettings::Language languageFromString(const QString &value)
+{
+    return value == QStringLiteral("es") ? AppSettings::Language::Spanish : AppSettings::Language::English;
+}
+}
+
+AppSettings::Language AppSettings::language() const
+{
+    return languageFromString(QSettings().value(QStringLiteral("general/language"), QStringLiteral("en")).toString());
+}
+
+void AppSettings::setLanguage(Language language)
+{
+    QSettings().setValue(QStringLiteral("general/language"), languageToString(language));
 }
 
 AppSettings::Edge AppSettings::preferredEdge() const

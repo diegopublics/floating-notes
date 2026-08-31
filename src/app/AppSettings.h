@@ -26,6 +26,14 @@ public:
         Classic,
     };
 
+    enum class Language {
+        English,
+        Spanish,
+    };
+
+    Language language() const;
+    void setLanguage(Language language);
+
     Edge preferredEdge() const;
     void setPreferredEdge(Edge edge);
 

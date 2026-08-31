@@ -1,19 +1,25 @@
 #include "AllNotesWindow.h"
 
+#include "app/AppSettings.h"
 #include "app/ImportExport.h"
 #include "core/NoteBodyFormat.h"
+#include "AppIcons.h"
 #include "MarkdownEditor.h"
 
 #include <QCloseEvent>
+#include <QColor>
 #include <QComboBox>
 #include <QFileDialog>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QStyleHints>
 
 #include <algorithm>
 #include <utility>
@@ -21,6 +27,36 @@
 namespace {
 constexpr int SaveDelayMs = 250;
 constexpr int UndoDelayMs = 7000;
+
+QColor editorInkColor(const QString &paperColor)
+{
+    const QColor color(paperColor);
+    const int luminance = (color.red() * 299 + color.green() * 587 + color.blue() * 114) / 1000;
+    return luminance > 155 ? QColor(QStringLiteral("#38252d")) : QColor(QStringLiteral("#fff8f1"));
+}
+
+bool usesDarkTheme(const AppSettings *settings)
+{
+    if (settings->theme() == AppSettings::Theme::Dark) {
+        return true;
+    }
+    if (settings->theme() == AppSettings::Theme::Light) {
+        return false;
+    }
+    return QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
+}
+
+QString richTextEditorStyle(const QColor &ink)
+{
+    return QStringLiteral(
+               "QWidget#noteBodyEditor { background: transparent; } "
+               "QPlainTextEdit, QTextEdit { background: transparent; border: 0; color: %1; "
+               "selection-background-color: rgba(74,45,57,185); selection-color: #fff8f1; padding: 9px 8px; } "
+               "QFrame#markdownToolbar { background: rgba(61,36,47,16); border-bottom: 1px solid rgba(61,36,47,38); } "
+               "QToolButton { background: transparent; border: 0; border-radius: 4px; color: %1; padding: 1px; font-size: 10px; } "
+               "QToolButton:hover, QToolButton:checked { background: rgba(61,36,47,48); }")
+        .arg(ink.name());
+}
 
 QString previewText(const Note &note)
 {
@@ -34,13 +70,15 @@ QString previewText(const Note &note)
 }
 
 AllNotesWindow::AllNotesWindow(NoteRepository *repository,
+                               AppSettings *settings,
                                std::function<void()> notesChangedCallback,
                                QWidget *parent)
     : QWidget(parent)
     , m_repository(repository)
+    , m_settings(settings)
     , m_notesChangedCallback(std::move(notesChangedCallback))
 {
-    setWindowTitle("All Notes");
+    setWindowTitle(tr("All Notes"));
     setWindowFlag(Qt::Window, true);
     setAttribute(Qt::WA_DeleteOnClose, false);
     resize(860, 520);
@@ -70,7 +108,7 @@ void AllNotesWindow::refresh()
     QString errorMessage;
     m_notes = m_repository->loadNotes(currentFilter(), m_searchEdit->text(), &errorMessage);
     if (!errorMessage.isEmpty()) {
-        updateStatus(QStringLiteral("Load error: %1").arg(errorMessage));
+        updateStatus(tr("Load error: %1").arg(errorMessage));
     }
 
     updateList();
@@ -81,6 +119,11 @@ void AllNotesWindow::refresh()
 void AllNotesWindow::saveCurrentNoteNow()
 {
     saveCurrentNote();
+}
+
+void AllNotesWindow::applySettings()
+{
+    updateEditor();
 }
 
 void AllNotesWindow::closeEvent(QCloseEvent *event)
@@ -97,22 +140,22 @@ void AllNotesWindow::buildUi()
     rootLayout->setSpacing(10);
 
     auto *topLayout = new QHBoxLayout;
-    auto *title = new QLabel("All Notes", this);
+    auto *title = new QLabel(tr("All Notes"), this);
     QFont titleFont = title->font();
     titleFont.setPointSize(14);
     titleFont.setWeight(QFont::DemiBold);
     title->setFont(titleFont);
 
     m_searchEdit = new QLineEdit(this);
-    m_searchEdit->setPlaceholderText("Search notes or tags");
+    m_searchEdit->setPlaceholderText(tr("Search notes or tags"));
     connect(m_searchEdit, &QLineEdit::textChanged, this, [this] {
         refresh();
     });
 
     m_filterCombo = new QComboBox(this);
-    m_filterCombo->addItem("All", static_cast<int>(NoteRepository::NoteListFilter::All));
-    m_filterCombo->addItem("Active", static_cast<int>(NoteRepository::NoteListFilter::Active));
-    m_filterCombo->addItem("Archived", static_cast<int>(NoteRepository::NoteListFilter::Archived));
+    m_filterCombo->addItem(tr("All"), static_cast<int>(NoteRepository::NoteListFilter::All));
+    m_filterCombo->addItem(tr("Active"), static_cast<int>(NoteRepository::NoteListFilter::Active));
+    m_filterCombo->addItem(tr("Archived"), static_cast<int>(NoteRepository::NoteListFilter::Archived));
     m_filterCombo->setCurrentIndex(1);
     connect(m_filterCombo, &QComboBox::currentIndexChanged, this, [this] {
         refresh();
@@ -125,19 +168,19 @@ void AllNotesWindow::buildUi()
     rootLayout->addLayout(topLayout);
 
     auto *toolsLayout = new QHBoxLayout;
-    auto *importButton = new QPushButton("Import", this);
+    auto *importButton = new QPushButton(tr("Import"), this);
     connect(importButton, &QPushButton::clicked, this, [this] {
         importNotes();
     });
-    auto *backupButton = new QPushButton("Backup", this);
+    auto *backupButton = new QPushButton(tr("Backup"), this);
     connect(backupButton, &QPushButton::clicked, this, [this] {
         exportBackup();
     });
-    auto *markdownButton = new QPushButton("Markdown", this);
+    auto *markdownButton = new QPushButton(tr("Markdown"), this);
     connect(markdownButton, &QPushButton::clicked, this, [this] {
         exportMarkdown();
     });
-    auto *textButton = new QPushButton("Text", this);
+    auto *textButton = new QPushButton(tr("Text"), this);
     connect(textButton, &QPushButton::clicked, this, [this] {
         exportText();
     });
@@ -163,58 +206,61 @@ void AllNotesWindow::buildUi()
     editorLayout->setSpacing(8);
 
     m_titleEdit = new QLineEdit(this);
-    m_titleEdit->setPlaceholderText("Title");
+    m_titleEdit->setPlaceholderText(tr("Title"));
     connect(m_titleEdit, &QLineEdit::textChanged, this, [this] {
         scheduleSave();
     });
     editorLayout->addWidget(m_titleEdit);
 
     m_tagsEdit = new QLineEdit(this);
-    m_tagsEdit->setPlaceholderText("Tags");
+    m_tagsEdit->setPlaceholderText(tr("Tags"));
     connect(m_tagsEdit, &QLineEdit::textChanged, this, [this] {
         scheduleSave();
     });
     editorLayout->addWidget(m_tagsEdit);
 
     m_bodyEdit = new MarkdownEditor(this);
-    m_bodyEdit->setPlaceholderText("Write a note...");
+    m_bodyEdit->setObjectName(QStringLiteral("noteBodyEditor"));
+    m_bodyEdit->setPlaceholderText(tr("Write a note..."));
     connect(m_bodyEdit, &MarkdownEditor::textChanged, this, [this] {
         scheduleSave();
     });
     editorLayout->addWidget(m_bodyEdit, 1);
 
     auto *actionsLayout = new QHBoxLayout;
-    m_checklistButton = new QPushButton("Checklist", this);
-    connect(m_checklistButton, &QPushButton::clicked, this, [this] {
-        insertChecklistLine();
-    });
-
-    m_historyUndoButton = new QPushButton("Undo", this);
-    m_historyUndoButton->setToolTip("Restore the previous saved version");
+    m_historyUndoButton = new QPushButton(this);
+    m_historyUndoButton->setFixedSize(28, 26);
+    AppIcons::setButtonIcon(m_historyUndoButton, AppIcons::Icon::Undo, tr("Restore the previous saved version"));
     connect(m_historyUndoButton, &QPushButton::clicked, this, &AllNotesWindow::undoCurrentNote);
 
-    m_historyRedoButton = new QPushButton("Redo", this);
-    m_historyRedoButton->setToolTip("Restore the next saved version");
+    m_historyRedoButton = new QPushButton(this);
+    m_historyRedoButton->setFixedSize(28, 26);
+    AppIcons::setButtonIcon(m_historyRedoButton, AppIcons::Icon::Redo, tr("Restore the next saved version"));
     connect(m_historyRedoButton, &QPushButton::clicked, this, &AllNotesWindow::redoCurrentNote);
 
-    m_archiveRestoreButton = new QPushButton("Archive", this);
+    m_archiveRestoreButton = new QPushButton(this);
+    m_archiveRestoreButton->setFixedSize(28, 26);
+    AppIcons::setButtonIcon(m_archiveRestoreButton, AppIcons::Icon::Archive, tr("Archive note"));
     connect(m_archiveRestoreButton, &QPushButton::clicked, this, [this] {
         archiveOrRestoreCurrentNote();
     });
 
-    m_deleteButton = new QPushButton("Delete", this);
+    m_deleteButton = new QPushButton(this);
+    m_deleteButton->setFixedSize(28, 26);
+    AppIcons::setButtonIcon(m_deleteButton, AppIcons::Icon::Delete, tr("Delete note"));
     connect(m_deleteButton, &QPushButton::clicked, this, [this] {
         deleteCurrentNote();
     });
 
-    m_undoButton = new QPushButton("Undo delete", this);
+    m_undoButton = new QPushButton(this);
+    m_undoButton->setFixedSize(28, 26);
+    AppIcons::setButtonIcon(m_undoButton, AppIcons::Icon::Undo, tr("Undo delete"));
     m_undoButton->hide();
     connect(m_undoButton, &QPushButton::clicked, this, [this] {
         undoDelete();
     });
 
     m_statusLabel = new QLabel(this);
-    actionsLayout->addWidget(m_checklistButton);
     actionsLayout->addWidget(m_historyUndoButton);
     actionsLayout->addWidget(m_historyRedoButton);
     actionsLayout->addWidget(m_archiveRestoreButton);
@@ -247,7 +293,7 @@ void AllNotesWindow::scheduleSave()
     }
 
     m_saveTimer->start();
-    updateStatus(QStringLiteral("Editing..."));
+    updateStatus(tr("Editing..."));
 }
 
 void AllNotesWindow::saveCurrentNote()
@@ -259,18 +305,18 @@ void AllNotesWindow::saveCurrentNote()
     Note &note = m_notes[m_currentNoteIndex];
     note.title = m_titleEdit->text().trimmed();
     if (note.title.isEmpty()) {
-        note.title = QStringLiteral("Untitled");
+        note.title = tr("Untitled");
     }
     note.tags = m_tagsEdit->text().trimmed();
     note.body = m_bodyEdit->storage();
 
     QString errorMessage;
     if (!m_repository->saveNote(note, &errorMessage)) {
-        updateStatus(QStringLiteral("Save error: %1").arg(errorMessage));
+        updateStatus(tr("Save error: %1").arg(errorMessage));
         return;
     }
 
-    updateStatus(QStringLiteral("Saved"));
+    updateStatus(tr("Saved"));
     updateHistoryButtons();
     updateList();
     notifyNotesChanged();
@@ -282,20 +328,28 @@ void AllNotesWindow::archiveOrRestoreCurrentNote()
         return;
     }
 
-    saveCurrentNote();
-
     Note &note = m_notes[m_currentNoteIndex];
+    if (!note.archived
+        && QMessageBox::question(this,
+                                  tr("Archive note"),
+                                  tr("Archive \"%1\"?").arg(note.title),
+                                  QMessageBox::Yes | QMessageBox::No,
+                                  QMessageBox::No) != QMessageBox::Yes) {
+        return;
+    }
+
+    saveCurrentNote();
     QString errorMessage;
     const bool ok = note.archived
         ? m_repository->restoreNote(note.id, &errorMessage)
         : m_repository->archiveNote(note.id, &errorMessage);
 
     if (!ok) {
-        updateStatus(QStringLiteral("State error: %1").arg(errorMessage));
+        updateStatus(tr("State error: %1").arg(errorMessage));
         return;
     }
 
-    updateStatus(note.archived ? QStringLiteral("Restored") : QStringLiteral("Archived"));
+    updateStatus(note.archived ? tr("Restored") : tr("Archived"));
     notifyNotesChanged();
     refresh();
 }
@@ -303,6 +357,15 @@ void AllNotesWindow::archiveOrRestoreCurrentNote()
 void AllNotesWindow::deleteCurrentNote()
 {
     if (m_currentNoteIndex < 0 || m_currentNoteIndex >= m_notes.size()) {
+        return;
+    }
+
+    const Note &note = m_notes.at(m_currentNoteIndex);
+    if (QMessageBox::question(this,
+                              tr("Delete note"),
+                              tr("Delete \"%1\"?").arg(note.title),
+                              QMessageBox::Yes | QMessageBox::No,
+                              QMessageBox::No) != QMessageBox::Yes) {
         return;
     }
 
@@ -314,7 +377,7 @@ void AllNotesWindow::deleteCurrentNote()
 
     QString errorMessage;
     if (!m_repository->markNoteDeleted(m_pendingDeleteNoteId, &errorMessage)) {
-        updateStatus(QStringLiteral("Delete error: %1").arg(errorMessage));
+        updateStatus(tr("Delete error: %1").arg(errorMessage));
         m_pendingDeleteNoteId = 0;
         return;
     }
@@ -324,7 +387,7 @@ void AllNotesWindow::deleteCurrentNote()
     selectNoteByIndex(std::min(deletedIndex, static_cast<int>(m_notes.size()) - 1));
     m_undoButton->show();
     m_deleteUndoTimer->start();
-    updateStatus(QStringLiteral("Deleted"));
+    updateStatus(tr("Deleted"));
     notifyNotesChanged();
 }
 
@@ -341,11 +404,11 @@ void AllNotesWindow::undoDelete()
 
     QString errorMessage;
     if (!m_repository->restoreDeletedNote(noteId, &errorMessage)) {
-        updateStatus(QStringLiteral("Undo error: %1").arg(errorMessage));
+        updateStatus(tr("Undo error: %1").arg(errorMessage));
         return;
     }
 
-    updateStatus(QStringLiteral("Restored"));
+    updateStatus(tr("Restored"));
     notifyNotesChanged();
     refresh();
 }
@@ -360,13 +423,13 @@ void AllNotesWindow::undoCurrentNote()
     Note restoredNote;
     QString errorMessage;
     if (!m_repository->undoNote(m_notes.at(m_currentNoteIndex).id, &restoredNote, &errorMessage)) {
-        updateStatus(QStringLiteral("Undo error: %1").arg(errorMessage));
+        updateStatus(tr("Undo error: %1").arg(errorMessage));
         return;
     }
     m_notes[m_currentNoteIndex] = restoredNote;
     updateEditor();
     updateList();
-    updateStatus(QStringLiteral("Previous version restored"));
+    updateStatus(tr("Previous version restored"));
     notifyNotesChanged();
 }
 
@@ -380,13 +443,13 @@ void AllNotesWindow::redoCurrentNote()
     Note restoredNote;
     QString errorMessage;
     if (!m_repository->redoNote(m_notes.at(m_currentNoteIndex).id, &restoredNote, &errorMessage)) {
-        updateStatus(QStringLiteral("Redo error: %1").arg(errorMessage));
+        updateStatus(tr("Redo error: %1").arg(errorMessage));
         return;
     }
     m_notes[m_currentNoteIndex] = restoredNote;
     updateEditor();
     updateList();
-    updateStatus(QStringLiteral("Next version restored"));
+    updateStatus(tr("Next version restored"));
     notifyNotesChanged();
 }
 
@@ -403,84 +466,74 @@ void AllNotesWindow::finalizePendingDelete()
 
     QString errorMessage;
     if (!m_repository->deleteNotePermanently(noteId, &errorMessage)) {
-        updateStatus(QStringLiteral("Delete cleanup error: %1").arg(errorMessage));
+        updateStatus(tr("Delete cleanup error: %1").arg(errorMessage));
     }
-}
-
-void AllNotesWindow::insertChecklistLine()
-{
-    if (m_currentNoteIndex < 0 || m_currentNoteIndex >= m_notes.size()) {
-        return;
-    }
-
-    m_bodyEdit->insertChecklistItem();
-    scheduleSave();
 }
 
 void AllNotesWindow::importNotes()
 {
     const QStringList filePaths = QFileDialog::getOpenFileNames(this,
-                                                                "Import Notes",
+                                                                tr("Import Notes"),
                                                                 QString(),
-                                                                "Notes (*.fnotes *.md *.txt)");
+                                                                tr("Notes (*.fnotes *.md *.txt)"));
     if (filePaths.isEmpty()) {
         return;
     }
 
     QString errorMessage;
     if (!ImportExport::importFiles(filePaths, m_repository, &errorMessage)) {
-        updateStatus(QStringLiteral("Import error: %1").arg(errorMessage));
+        updateStatus(tr("Import error: %1").arg(errorMessage));
         return;
     }
 
-    updateStatus(QStringLiteral("Imported"));
+    updateStatus(tr("Imported"));
     notifyNotesChanged();
     refresh();
 }
 
 void AllNotesWindow::exportBackup()
 {
-    const QString filePath = QFileDialog::getSaveFileName(this, "Export Backup", QStringLiteral("floating-notes.fnotes"), "Floating Notes (*.fnotes)");
+    const QString filePath = QFileDialog::getSaveFileName(this, tr("Export Backup"), QStringLiteral("floating-notes.fnotes"), tr("Floating Notes (*.fnotes)"));
     if (filePath.isEmpty()) {
         return;
     }
 
     QString errorMessage;
     if (!ImportExport::exportBackup(filePath, exportNotes(), &errorMessage)) {
-        updateStatus(QStringLiteral("Export error: %1").arg(errorMessage));
+        updateStatus(tr("Export error: %1").arg(errorMessage));
         return;
     }
-    updateStatus(QStringLiteral("Backup exported"));
+    updateStatus(tr("Backup exported"));
 }
 
 void AllNotesWindow::exportMarkdown()
 {
-    const QString directoryPath = QFileDialog::getExistingDirectory(this, "Export Markdown");
+    const QString directoryPath = QFileDialog::getExistingDirectory(this, tr("Export Markdown"));
     if (directoryPath.isEmpty()) {
         return;
     }
 
     QString errorMessage;
     if (!ImportExport::exportMarkdown(directoryPath, exportNotes(), &errorMessage)) {
-        updateStatus(QStringLiteral("Export error: %1").arg(errorMessage));
+        updateStatus(tr("Export error: %1").arg(errorMessage));
         return;
     }
-    updateStatus(QStringLiteral("Markdown exported"));
+    updateStatus(tr("Markdown exported"));
 }
 
 void AllNotesWindow::exportText()
 {
-    const QString directoryPath = QFileDialog::getExistingDirectory(this, "Export Text");
+    const QString directoryPath = QFileDialog::getExistingDirectory(this, tr("Export Text"));
     if (directoryPath.isEmpty()) {
         return;
     }
 
     QString errorMessage;
     if (!ImportExport::exportText(directoryPath, exportNotes(), &errorMessage)) {
-        updateStatus(QStringLiteral("Export error: %1").arg(errorMessage));
+        updateStatus(tr("Export error: %1").arg(errorMessage));
         return;
     }
-    updateStatus(QStringLiteral("Text exported"));
+    updateStatus(tr("Text exported"));
 }
 
 QVector<Note> AllNotesWindow::exportNotes() const
@@ -505,7 +558,6 @@ void AllNotesWindow::updateEditor()
     m_titleEdit->setEnabled(hasNote);
     m_tagsEdit->setEnabled(hasNote);
     m_bodyEdit->setEnabled(hasNote);
-    m_checklistButton->setEnabled(hasNote);
     updateHistoryButtons();
     m_archiveRestoreButton->setEnabled(hasNote);
     m_deleteButton->setEnabled(hasNote);
@@ -515,12 +567,16 @@ void AllNotesWindow::updateEditor()
         m_titleEdit->setText(note.title);
         m_tagsEdit->setText(note.tags);
         m_bodyEdit->setMarkdown(note.body);
-        m_archiveRestoreButton->setText(note.archived ? QStringLiteral("Restore") : QStringLiteral("Archive"));
+        const QColor ink = usesDarkTheme(m_settings) ? QColor(QStringLiteral("#f2eee6")) : editorInkColor(note.color);
+        m_bodyEdit->setStyleSheet(richTextEditorStyle(ink));
+        AppIcons::setButtonIcon(m_archiveRestoreButton, AppIcons::Icon::Archive, note.archived ? tr("Restore note") : tr("Archive note"));
     } else {
         m_titleEdit->clear();
         m_tagsEdit->clear();
         m_bodyEdit->setMarkdown({});
-        m_archiveRestoreButton->setText(QStringLiteral("Archive"));
+        const QColor ink = usesDarkTheme(m_settings) ? QColor(QStringLiteral("#f2eee6")) : QColor(QStringLiteral("#38252d"));
+        m_bodyEdit->setStyleSheet(richTextEditorStyle(ink));
+        AppIcons::setButtonIcon(m_archiveRestoreButton, AppIcons::Icon::Archive, tr("Archive note"));
     }
 
     m_loadingEditor = false;

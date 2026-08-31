@@ -1,0 +1,13 @@
+<RCC>
+    <qresource prefix="/icons/fontawesome">
+        <file alias="arrow-rotate-left.svg">icons/fontawesome/arrow-rotate-left.svg</file>
+        <file alias="arrow-rotate-right.svg">icons/fontawesome/arrow-rotate-right.svg</file>
+        <file alias="thumbtack.svg">icons/fontawesome/thumbtack.svg</file>
+        <file alias="list-check.svg">icons/fontawesome/list-check.svg</file>
+        <file alias="list.svg">icons/fontawesome/list.svg</file>
+        <file alias="box-archive.svg">icons/fontawesome/box-archive.svg</file>
+        <file alias="trash.svg">icons/fontawesome/trash.svg</file>
+        <file alias="xmark.svg">icons/fontawesome/xmark.svg</file>
+        <file alias="plus.svg">icons/fontawesome/plus.svg</file>
+    </qresource>
+</RCC>

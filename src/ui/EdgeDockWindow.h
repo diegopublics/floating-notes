@@ -25,6 +25,8 @@ class QTimer;
 
 class EdgeDockWindow final : public QWidget
 {
+    Q_OBJECT
+
 public:
     explicit EdgeDockWindow(NoteRepository *repository,
                             AppSettings *settings,
@@ -68,7 +70,6 @@ private:
     void undoCurrentNote();
     void redoCurrentNote();
     void finalizePendingDelete();
-    void insertChecklistLine();
     void selectNote(int index);
     void scheduleSave();
     void saveCurrentNote();
@@ -118,7 +119,6 @@ private:
     QPushButton *m_undoButton = nullptr;
     QPushButton *m_historyUndoButton = nullptr;
     QPushButton *m_historyRedoButton = nullptr;
-    QPushButton *m_checklistButton = nullptr;
     QPushButton *m_pinButton = nullptr;
     QWidget *m_editorPanel = nullptr;
     QLabel *m_statusLabel = nullptr;

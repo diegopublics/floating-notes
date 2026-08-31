@@ -14,6 +14,7 @@
 #include <QPixmap>
 #include <QScreen>
 #include <QSystemTrayIcon>
+#include <QDebug>
 
 #include <algorithm>
 
@@ -36,6 +37,11 @@ bool AppController::start(QString *errorMessage)
 {
     if (!m_repository.open(errorMessage)) {
         return false;
+    }
+
+    QString backupError;
+    if (!m_repository.createDailyBackup(&backupError)) {
+        qWarning().noquote() << "Daily database backup failed:" << backupError;
     }
 
     applySettings();
@@ -64,32 +70,32 @@ void AppController::buildTray()
     }
 
     m_trayMenu = new QMenu;
-    m_trayMenu->addAction("New Note", this, [this] {
+    m_trayMenu->addAction(tr("New Note"), this, [this] {
         createNote();
     });
-    m_trayMenu->addAction("All Notes", this, [this] {
+    m_trayMenu->addAction(tr("All Notes"), this, [this] {
         showAllNotes();
     });
-    m_trayMenu->addAction("Archive Current", this, [this] {
+    m_trayMenu->addAction(tr("Archive Current"), this, [this] {
         archiveCurrentNote();
     });
-    m_trayMenu->addAction("Reset Note Window Positions", this, [this] {
+    m_trayMenu->addAction(tr("Reset Note Window Positions"), this, [this] {
         resetNoteWindowPositions();
     });
-    m_trayMenu->addAction("Help", this, [this] {
+    m_trayMenu->addAction(tr("Help"), this, [this] {
         showHelp();
     });
-    m_trayMenu->addAction("Settings", this, [this] {
+    m_trayMenu->addAction(tr("Settings"), this, [this] {
         showSettings();
     });
     m_trayMenu->addSeparator();
-    m_trayMenu->addAction("Show Docks", this, [this] {
+    m_trayMenu->addAction(tr("Show Docks"), this, [this] {
         showDocks();
     });
-    m_trayMenu->addAction("Hide Docks", this, [this] {
+    m_trayMenu->addAction(tr("Hide Docks"), this, [this] {
         hideDocks();
     });
-    m_trayMenu->addAction("Exit", this, [this] {
+    m_trayMenu->addAction(tr("Exit"), this, [this] {
         exitApplication();
     });
 
@@ -142,6 +148,9 @@ void AppController::applySettings()
     }
     for (EdgeDockWindow *editor : m_noteEditorWindows) {
         editor->applySettings();
+    }
+    if (m_allNotesWindow != nullptr) {
+        m_allNotesWindow->applySettings();
     }
 }
 
@@ -225,7 +234,7 @@ void AppController::resetNoteWindowPositions()
 void AppController::showAllNotes()
 {
     if (m_allNotesWindow == nullptr) {
-        m_allNotesWindow = new AllNotesWindow(&m_repository, [this] {
+        m_allNotesWindow = new AllNotesWindow(&m_repository, &m_settings, [this] {
             refreshAllDocks();
         });
     }

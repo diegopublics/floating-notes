@@ -72,26 +72,26 @@ MarkdownEditor::MarkdownEditor(QWidget *parent)
         toolbarLayout->addWidget(button);
         return button;
     };
-    addButton(QStringLiteral("H"), QStringLiteral("Heading"), [this] { applyHeading(); });
-    m_boldButton = addButton(QStringLiteral("B"), QStringLiteral("Bold"), [this] {
+    addButton(QStringLiteral("H"), tr("Heading"), [this] { applyHeading(); });
+    m_boldButton = addButton(QStringLiteral("B"), tr("Bold"), [this] {
         QTextCharFormat format;
         format.setFontWeight(m_editor->fontWeight() >= QFont::Bold ? QFont::Normal : QFont::Bold);
         applyCharacterFormat(format);
     });
     m_boldButton->setCheckable(true);
-    m_italicButton = addButton(QStringLiteral("I"), QStringLiteral("Italic"), [this] {
+    m_italicButton = addButton(QStringLiteral("I"), tr("Italic"), [this] {
         QTextCharFormat format;
         format.setFontItalic(!m_editor->fontItalic());
         applyCharacterFormat(format);
     });
     m_italicButton->setCheckable(true);
-    m_strikeButton = addButton(QStringLiteral("S"), QStringLiteral("Strikethrough"), [this] {
+    m_strikeButton = addButton(QStringLiteral("S"), tr("Strikethrough"), [this] {
         QTextCharFormat format;
         format.setFontStrikeOut(!m_editor->currentCharFormat().fontStrikeOut());
         applyCharacterFormat(format);
     });
     m_strikeButton->setCheckable(true);
-    m_codeButton = addButton(QStringLiteral("</>"), QStringLiteral("Inline code"), [this] {
+    m_codeButton = addButton(QStringLiteral("</>"), tr("Inline code"), [this] {
         QTextCharFormat format;
         const bool useFixedPitch = !m_editor->currentCharFormat().fontFixedPitch();
         format.setFontFixedPitch(useFixedPitch);
@@ -105,10 +105,10 @@ MarkdownEditor::MarkdownEditor(QWidget *parent)
         applyCharacterFormat(format);
     });
     m_codeButton->setCheckable(true);
-    addButton(QStringLiteral("Link"), QStringLiteral("Insert link"), [this] { insertLink(); });
-    auto *textColorButton = createToolButton(QStringLiteral("A"), QStringLiteral("Text color"), toolbar);
+    addButton(QStringLiteral("Link"), tr("Insert link"), [this] { insertLink(); });
+    auto *textColorButton = createToolButton(QStringLiteral("A"), tr("Text color"), toolbar);
     auto *textColorMenu = new QMenu(textColorButton);
-    auto *clearTextColorAction = textColorMenu->addAction(QStringLiteral("Clear text color"));
+    auto *clearTextColorAction = textColorMenu->addAction(tr("Clear text color"));
     connect(clearTextColorAction, &QAction::triggered, this, [this] {
         clearCharacterProperty(QTextFormat::ForegroundBrush);
     });
@@ -120,10 +120,10 @@ MarkdownEditor::MarkdownEditor(QWidget *parent)
     textColorButton->setMenu(textColorMenu);
     textColorButton->setPopupMode(QToolButton::InstantPopup);
     toolbarLayout->addWidget(textColorButton);
-    auto *highlightButton = createToolButton(QStringLiteral("HA"), QStringLiteral("Text highlight color"), toolbar);
+    auto *highlightButton = createToolButton(QStringLiteral("HA"), tr("Text highlight color"), toolbar);
     highlightButton->setFixedWidth(29);
     auto *highlightMenu = new QMenu(highlightButton);
-    auto *clearHighlightAction = highlightMenu->addAction(QStringLiteral("Clear highlight color"));
+    auto *clearHighlightAction = highlightMenu->addAction(tr("Clear highlight color"));
     connect(clearHighlightAction, &QAction::triggered, this, [this] {
         clearCharacterProperty(QTextFormat::BackgroundBrush);
     });
@@ -135,10 +135,10 @@ MarkdownEditor::MarkdownEditor(QWidget *parent)
     highlightButton->setMenu(highlightMenu);
     highlightButton->setPopupMode(QToolButton::InstantPopup);
     toolbarLayout->addWidget(highlightButton);
-    addButton(QStringLiteral("*"), QStringLiteral("Bulleted list"), [this] { applyList(QTextListFormat::ListDisc); });
-    addButton(QStringLiteral("1."), QStringLiteral("Numbered list"), [this] { applyList(QTextListFormat::ListDecimal); });
-    addButton(QStringLiteral("Task"), QStringLiteral("Task list"), [this] { insertChecklistItem(); });
-    addButton(QStringLiteral(">"), QStringLiteral("Quote"), [this] {
+    addButton(QStringLiteral("*"), tr("Bulleted list"), [this] { applyList(QTextListFormat::ListDisc); });
+    addButton(QStringLiteral("1."), tr("Numbered list"), [this] { applyList(QTextListFormat::ListDecimal); });
+    addButton(tr("Task"), tr("Task list"), [this] { insertChecklistItem(); });
+    addButton(QStringLiteral(">"), tr("Quote"), [this] {
         QTextCursor cursor = m_editor->textCursor();
         QTextBlockFormat format;
         format.setLeftMargin(18);
@@ -286,7 +286,7 @@ void MarkdownEditor::insertLink()
     QTextCursor cursor = m_editor->textCursor();
     QString text = cursor.selectedText();
     if (text.isEmpty()) {
-        text = QInputDialog::getText(this, QStringLiteral("Insert link"), QStringLiteral("Text"));
+        text = QInputDialog::getText(this, tr("Insert link"), tr("Text"));
         if (text.isEmpty()) {
             return;
         }
@@ -294,7 +294,7 @@ void MarkdownEditor::insertLink()
         cursor.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, text.size());
     }
 
-    const QString url = QInputDialog::getText(this, QStringLiteral("Insert link"), QStringLiteral("URL"));
+    const QString url = QInputDialog::getText(this, tr("Insert link"), tr("URL"));
     if (url.isEmpty()) {
         return;
     }

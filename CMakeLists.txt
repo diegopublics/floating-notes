@@ -7,8 +7,10 @@ project(FloatingNotes
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.11 REQUIRED COMPONENTS Sql Widgets)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Sql Svg Widgets)
+find_package(Qt6 6.11 REQUIRED COMPONENTS LinguistTools)
 
 qt_standard_project_setup(REQUIRES 6.11)
 
@@ -38,6 +40,8 @@ qt_add_executable(FloatingNotes
     src/ui/AllNotesWindow.h
     src/ui/AppTheme.cpp
     src/ui/AppTheme.h
+    src/ui/AppIcons.cpp
+    src/ui/AppIcons.h
     src/ui/EdgeDockWindow.cpp
     src/ui/EdgeDockWindow.h
     src/ui/HelpDialog.cpp
@@ -46,11 +50,13 @@ qt_add_executable(FloatingNotes
     src/ui/MarkdownEditor.h
     src/ui/SettingsDialog.cpp
     src/ui/SettingsDialog.h
+    resources/resources.qrc
 )
 
 target_link_libraries(FloatingNotes
     PRIVATE
         Qt6::Sql
+        Qt6::Svg
         Qt6::Widgets
 )
 
@@ -65,4 +71,9 @@ target_include_directories(FloatingNotes
 
 set_target_properties(FloatingNotes PROPERTIES
     WIN32_EXECUTABLE ON
+)
+
+qt_add_translations(FloatingNotes
+    SOURCE_TARGETS FloatingNotes
+    TS_FILES translations/FloatingNotes_es.ts
 )

@@ -20,6 +20,8 @@ class SettingsDialog;
 
 class AppController final : public QObject
 {
+    Q_OBJECT
+
 public:
     explicit AppController(QObject *parent = nullptr);
     ~AppController() override;
