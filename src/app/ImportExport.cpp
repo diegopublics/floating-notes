@@ -1,5 +1,6 @@
 #include "ImportExport.h"
 
+#include "core/NoteBodyFormat.h"
 #include "persistence/NoteRepository.h"
 
 #include <QDir>
@@ -108,7 +109,7 @@ bool ImportExport::exportMarkdown(const QString &directoryPath, const QVector<No
         if (!note.tags.trimmed().isEmpty()) {
             content += QStringLiteral("Tags: %1\n\n").arg(note.tags.trimmed());
         }
-        content += note.body;
+        content += NoteBodyFormat::toMarkdown(note.body);
         if (!content.endsWith(QLatin1Char('\n'))) {
             content += QLatin1Char('\n');
         }
@@ -131,7 +132,7 @@ bool ImportExport::exportText(const QString &directoryPath, const QVector<Note> 
 
     for (int index = 0; index < notes.size(); ++index) {
         const Note &note = notes.at(index);
-        QString content = note.body;
+        QString content = NoteBodyFormat::toPlainText(note.body);
         if (!content.endsWith(QLatin1Char('\n'))) {
             content += QLatin1Char('\n');
         }

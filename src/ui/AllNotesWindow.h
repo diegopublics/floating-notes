@@ -12,7 +12,7 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
-class QPlainTextEdit;
+class MarkdownEditor;
 class QPushButton;
 class QTimer;
 
@@ -38,6 +38,8 @@ private:
     void archiveOrRestoreCurrentNote();
     void deleteCurrentNote();
     void undoDelete();
+    void undoCurrentNote();
+    void redoCurrentNote();
     void finalizePendingDelete();
     void insertChecklistLine();
     void importNotes();
@@ -49,6 +51,7 @@ private:
     void updateEditor();
     void updateList();
     void updateStatus(const QString &text);
+    void updateHistoryButtons();
 
     NoteRepository::NoteListFilter currentFilter() const;
 
@@ -60,10 +63,12 @@ private:
     QListWidget *m_notesList = nullptr;
     QLineEdit *m_titleEdit = nullptr;
     QLineEdit *m_tagsEdit = nullptr;
-    QPlainTextEdit *m_bodyEdit = nullptr;
+    MarkdownEditor *m_bodyEdit = nullptr;
     QPushButton *m_archiveRestoreButton = nullptr;
     QPushButton *m_deleteButton = nullptr;
     QPushButton *m_undoButton = nullptr;
+    QPushButton *m_historyUndoButton = nullptr;
+    QPushButton *m_historyRedoButton = nullptr;
     QPushButton *m_checklistButton = nullptr;
     QLabel *m_statusLabel = nullptr;
     QTimer *m_saveTimer = nullptr;

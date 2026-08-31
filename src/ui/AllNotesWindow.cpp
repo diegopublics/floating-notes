@@ -1,6 +1,8 @@
 #include "AllNotesWindow.h"
 
 #include "app/ImportExport.h"
+#include "core/NoteBodyFormat.h"
+#include "MarkdownEditor.h"
 
 #include <QCloseEvent>
 #include <QComboBox>
@@ -9,9 +11,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QPlainTextEdit>
 #include <QPushButton>
-#include <QTextCursor>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -24,7 +24,7 @@ constexpr int UndoDelayMs = 7000;
 
 QString previewText(const Note &note)
 {
-    const QString body = note.body.simplified();
+    const QString body = NoteBodyFormat::toPlainText(note.body).simplified();
     if (body.isEmpty()) {
         return note.archived ? QStringLiteral("Archived") : QStringLiteral("Active");
     }
@@ -176,10 +176,9 @@ void AllNotesWindow::buildUi()
     });
     editorLayout->addWidget(m_tagsEdit);
 
-    m_bodyEdit = new QPlainTextEdit(this);
+    m_bodyEdit = new MarkdownEditor(this);
     m_bodyEdit->setPlaceholderText("Write a note...");
-    m_bodyEdit->setTabChangesFocus(true);
-    connect(m_bodyEdit, &QPlainTextEdit::textChanged, this, [this] {
+    connect(m_bodyEdit, &MarkdownEditor::textChanged, this, [this] {
         scheduleSave();
     });
     editorLayout->addWidget(m_bodyEdit, 1);
@@ -189,6 +188,14 @@ void AllNotesWindow::buildUi()
     connect(m_checklistButton, &QPushButton::clicked, this, [this] {
         insertChecklistLine();
     });
+
+    m_historyUndoButton = new QPushButton("Undo", this);
+    m_historyUndoButton->setToolTip("Restore the previous saved version");
+    connect(m_historyUndoButton, &QPushButton::clicked, this, &AllNotesWindow::undoCurrentNote);
+
+    m_historyRedoButton = new QPushButton("Redo", this);
+    m_historyRedoButton->setToolTip("Restore the next saved version");
+    connect(m_historyRedoButton, &QPushButton::clicked, this, &AllNotesWindow::redoCurrentNote);
 
     m_archiveRestoreButton = new QPushButton("Archive", this);
     connect(m_archiveRestoreButton, &QPushButton::clicked, this, [this] {
@@ -208,6 +215,8 @@ void AllNotesWindow::buildUi()
 
     m_statusLabel = new QLabel(this);
     actionsLayout->addWidget(m_checklistButton);
+    actionsLayout->addWidget(m_historyUndoButton);
+    actionsLayout->addWidget(m_historyRedoButton);
     actionsLayout->addWidget(m_archiveRestoreButton);
     actionsLayout->addWidget(m_deleteButton);
     actionsLayout->addWidget(m_undoButton);
@@ -253,7 +262,7 @@ void AllNotesWindow::saveCurrentNote()
         note.title = QStringLiteral("Untitled");
     }
     note.tags = m_tagsEdit->text().trimmed();
-    note.body = m_bodyEdit->toPlainText();
+    note.body = m_bodyEdit->storage();
 
     QString errorMessage;
     if (!m_repository->saveNote(note, &errorMessage)) {
@@ -262,6 +271,7 @@ void AllNotesWindow::saveCurrentNote()
     }
 
     updateStatus(QStringLiteral("Saved"));
+    updateHistoryButtons();
     updateList();
     notifyNotesChanged();
 }
@@ -340,6 +350,46 @@ void AllNotesWindow::undoDelete()
     refresh();
 }
 
+void AllNotesWindow::undoCurrentNote()
+{
+    if (m_currentNoteIndex < 0 || m_currentNoteIndex >= m_notes.size()) {
+        return;
+    }
+    m_saveTimer->stop();
+    saveCurrentNote();
+    Note restoredNote;
+    QString errorMessage;
+    if (!m_repository->undoNote(m_notes.at(m_currentNoteIndex).id, &restoredNote, &errorMessage)) {
+        updateStatus(QStringLiteral("Undo error: %1").arg(errorMessage));
+        return;
+    }
+    m_notes[m_currentNoteIndex] = restoredNote;
+    updateEditor();
+    updateList();
+    updateStatus(QStringLiteral("Previous version restored"));
+    notifyNotesChanged();
+}
+
+void AllNotesWindow::redoCurrentNote()
+{
+    if (m_currentNoteIndex < 0 || m_currentNoteIndex >= m_notes.size()) {
+        return;
+    }
+    m_saveTimer->stop();
+    saveCurrentNote();
+    Note restoredNote;
+    QString errorMessage;
+    if (!m_repository->redoNote(m_notes.at(m_currentNoteIndex).id, &restoredNote, &errorMessage)) {
+        updateStatus(QStringLiteral("Redo error: %1").arg(errorMessage));
+        return;
+    }
+    m_notes[m_currentNoteIndex] = restoredNote;
+    updateEditor();
+    updateList();
+    updateStatus(QStringLiteral("Next version restored"));
+    notifyNotesChanged();
+}
+
 void AllNotesWindow::finalizePendingDelete()
 {
     if (m_pendingDeleteNoteId == 0) {
@@ -363,10 +413,7 @@ void AllNotesWindow::insertChecklistLine()
         return;
     }
 
-    QTextCursor cursor = m_bodyEdit->textCursor();
-    cursor.insertText(QStringLiteral("- [ ] "));
-    m_bodyEdit->setTextCursor(cursor);
-    m_bodyEdit->setFocus(Qt::ShortcutFocusReason);
+    m_bodyEdit->insertChecklistItem();
     scheduleSave();
 }
 
@@ -459,6 +506,7 @@ void AllNotesWindow::updateEditor()
     m_tagsEdit->setEnabled(hasNote);
     m_bodyEdit->setEnabled(hasNote);
     m_checklistButton->setEnabled(hasNote);
+    updateHistoryButtons();
     m_archiveRestoreButton->setEnabled(hasNote);
     m_deleteButton->setEnabled(hasNote);
 
@@ -466,16 +514,23 @@ void AllNotesWindow::updateEditor()
         const Note &note = m_notes.at(m_currentNoteIndex);
         m_titleEdit->setText(note.title);
         m_tagsEdit->setText(note.tags);
-        m_bodyEdit->setPlainText(note.body);
+        m_bodyEdit->setMarkdown(note.body);
         m_archiveRestoreButton->setText(note.archived ? QStringLiteral("Restore") : QStringLiteral("Archive"));
     } else {
         m_titleEdit->clear();
         m_tagsEdit->clear();
-        m_bodyEdit->clear();
+        m_bodyEdit->setMarkdown({});
         m_archiveRestoreButton->setText(QStringLiteral("Archive"));
     }
 
     m_loadingEditor = false;
+}
+
+void AllNotesWindow::updateHistoryButtons()
+{
+    const bool hasNote = m_currentNoteIndex >= 0 && m_currentNoteIndex < m_notes.size();
+    m_historyUndoButton->setEnabled(hasNote && m_repository->canUndoNote(m_notes.at(m_currentNoteIndex).id));
+    m_historyRedoButton->setEnabled(hasNote && m_repository->canRedoNote(m_notes.at(m_currentNoteIndex).id));
 }
 
 void AllNotesWindow::updateList()

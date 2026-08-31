@@ -12,6 +12,7 @@
 namespace {
 constexpr auto DriverName = "QSQLITE";
 constexpr auto DatabaseFileName = "notes.sqlite";
+constexpr int MaximumHistoryRevisions = 20;
 
 bool execute(QSqlQuery &query, QString *errorMessage)
 {
@@ -280,16 +281,132 @@ bool NoteRepository::deleteNotePermanently(int noteId, QString *errorMessage) co
 bool NoteRepository::saveNote(const Note &note, QString *errorMessage) const
 {
     QSqlDatabase database = QSqlDatabase::database(m_connectionName);
-    QSqlQuery query(database);
-    query.prepare(QStringLiteral(
-        "UPDATE notes "
-        "SET title = :title, body = :body, tags = :tags, updated_at = CURRENT_TIMESTAMP "
-        "WHERE id = :id"));
-    query.bindValue(QStringLiteral(":title"), note.title);
-    query.bindValue(QStringLiteral(":body"), note.body.isNull() ? QStringLiteral("") : note.body);
-    query.bindValue(QStringLiteral(":tags"), nonNullString(note.tags));
-    query.bindValue(QStringLiteral(":id"), note.id);
-    return execute(query, errorMessage);
+    if (!database.transaction()) {
+        setError(errorMessage, database.lastError().text());
+        return false;
+    }
+
+    QSqlQuery currentQuery(database);
+    currentQuery.prepare(QStringLiteral(
+        "SELECT title, body, color, tags, history_position "
+        "FROM notes WHERE id = :id"));
+    currentQuery.bindValue(QStringLiteral(":id"), note.id);
+    if (!execute(currentQuery, errorMessage) || !currentQuery.next()) {
+        database.rollback();
+        setError(errorMessage, QStringLiteral("Note could not be loaded for history."));
+        return false;
+    }
+
+    const QString body = nonNullString(note.body);
+    const QString tags = nonNullString(note.tags);
+    const QString currentTitle = currentQuery.value(0).toString();
+    const QString currentBody = currentQuery.value(1).toString();
+    const QString currentColor = currentQuery.value(2).toString();
+    const QString currentTags = currentQuery.value(3).toString();
+    int historyPosition = currentQuery.value(4).toInt();
+    if (currentTitle == note.title && currentBody == body && currentColor == note.color && currentTags == tags) {
+        return database.commit() || (setError(errorMessage, database.lastError().text()), false);
+    }
+
+    QSqlQuery historyCountQuery(database);
+    historyCountQuery.prepare(QStringLiteral("SELECT COUNT(*) FROM note_history WHERE note_id = :note_id"));
+    historyCountQuery.bindValue(QStringLiteral(":note_id"), note.id);
+    if (!execute(historyCountQuery, errorMessage) || !historyCountQuery.next()) {
+        database.rollback();
+        return false;
+    }
+
+    if (historyCountQuery.value(0).toInt() == 0) {
+        QSqlQuery initialHistoryQuery(database);
+        initialHistoryQuery.prepare(QStringLiteral(
+            "INSERT INTO note_history (note_id, revision, title, body, color, tags) "
+            "VALUES (:note_id, 0, :title, :body, :color, :tags)"));
+        initialHistoryQuery.bindValue(QStringLiteral(":note_id"), note.id);
+        initialHistoryQuery.bindValue(QStringLiteral(":title"), currentTitle);
+        initialHistoryQuery.bindValue(QStringLiteral(":body"), currentBody);
+        initialHistoryQuery.bindValue(QStringLiteral(":color"), currentColor);
+        initialHistoryQuery.bindValue(QStringLiteral(":tags"), currentTags);
+        if (!execute(initialHistoryQuery, errorMessage)) {
+            database.rollback();
+            return false;
+        }
+        historyPosition = 0;
+    }
+
+    QSqlQuery deleteRedoQuery(database);
+    deleteRedoQuery.prepare(QStringLiteral("DELETE FROM note_history WHERE note_id = :note_id AND revision > :revision"));
+    deleteRedoQuery.bindValue(QStringLiteral(":note_id"), note.id);
+    deleteRedoQuery.bindValue(QStringLiteral(":revision"), historyPosition);
+    if (!execute(deleteRedoQuery, errorMessage)) {
+        database.rollback();
+        return false;
+    }
+
+    QSqlQuery nextRevisionQuery(database);
+    nextRevisionQuery.prepare(QStringLiteral("SELECT COALESCE(MAX(revision), -1) + 1 FROM note_history WHERE note_id = :note_id"));
+    nextRevisionQuery.bindValue(QStringLiteral(":note_id"), note.id);
+    if (!execute(nextRevisionQuery, errorMessage) || !nextRevisionQuery.next()) {
+        database.rollback();
+        return false;
+    }
+    historyPosition = nextRevisionQuery.value(0).toInt();
+
+    QSqlQuery insertHistoryQuery(database);
+    insertHistoryQuery.prepare(QStringLiteral(
+        "INSERT INTO note_history (note_id, revision, title, body, color, tags) "
+        "VALUES (:note_id, :revision, :title, :body, :color, :tags)"));
+    insertHistoryQuery.bindValue(QStringLiteral(":note_id"), note.id);
+    insertHistoryQuery.bindValue(QStringLiteral(":revision"), historyPosition);
+    insertHistoryQuery.bindValue(QStringLiteral(":title"), note.title);
+    insertHistoryQuery.bindValue(QStringLiteral(":body"), body);
+    insertHistoryQuery.bindValue(QStringLiteral(":color"), note.color);
+    insertHistoryQuery.bindValue(QStringLiteral(":tags"), tags);
+    if (!execute(insertHistoryQuery, errorMessage)) {
+        database.rollback();
+        return false;
+    }
+
+    QSqlQuery updateQuery(database);
+    updateQuery.prepare(QStringLiteral(
+        "UPDATE notes SET title = :title, body = :body, color = :color, tags = :tags, "
+        "history_position = :history_position, updated_at = CURRENT_TIMESTAMP WHERE id = :id"));
+    updateQuery.bindValue(QStringLiteral(":title"), note.title);
+    updateQuery.bindValue(QStringLiteral(":body"), body);
+    updateQuery.bindValue(QStringLiteral(":color"), note.color);
+    updateQuery.bindValue(QStringLiteral(":tags"), tags);
+    updateQuery.bindValue(QStringLiteral(":history_position"), historyPosition);
+    updateQuery.bindValue(QStringLiteral(":id"), note.id);
+    if (!execute(updateQuery, errorMessage)) {
+        database.rollback();
+        return false;
+    }
+
+    QSqlQuery revisionCountQuery(database);
+    revisionCountQuery.prepare(QStringLiteral("SELECT COUNT(*) FROM note_history WHERE note_id = :note_id"));
+    revisionCountQuery.bindValue(QStringLiteral(":note_id"), note.id);
+    if (!execute(revisionCountQuery, errorMessage) || !revisionCountQuery.next()) {
+        database.rollback();
+        return false;
+    }
+    const int excessRevisions = revisionCountQuery.value(0).toInt() - MaximumHistoryRevisions;
+    if (excessRevisions > 0) {
+        QSqlQuery trimHistoryQuery(database);
+        trimHistoryQuery.prepare(QStringLiteral(
+            "DELETE FROM note_history WHERE note_id = :note_id AND revision IN ("
+            "SELECT revision FROM note_history WHERE note_id = :note_id ORDER BY revision ASC LIMIT :limit)"));
+        trimHistoryQuery.bindValue(QStringLiteral(":note_id"), note.id);
+        trimHistoryQuery.bindValue(QStringLiteral(":limit"), excessRevisions);
+        if (!execute(trimHistoryQuery, errorMessage)) {
+            database.rollback();
+            return false;
+        }
+    }
+
+    if (!database.commit()) {
+        setError(errorMessage, database.lastError().text());
+        return false;
+    }
+    return true;
 }
 
 bool NoteRepository::updateNoteColor(int noteId, const QString &color, QString *errorMessage) const
@@ -297,12 +414,122 @@ bool NoteRepository::updateNoteColor(int noteId, const QString &color, QString *
     QSqlDatabase database = QSqlDatabase::database(m_connectionName);
     QSqlQuery query(database);
     query.prepare(QStringLiteral(
-        "UPDATE notes "
-        "SET color = :color, updated_at = CURRENT_TIMESTAMP "
-        "WHERE id = :id"));
-    query.bindValue(QStringLiteral(":color"), color);
+        "SELECT id, title, body, color, tags, updated_at, archived FROM notes WHERE id = :id"));
     query.bindValue(QStringLiteral(":id"), noteId);
-    return execute(query, errorMessage);
+    if (!execute(query, errorMessage) || !query.next()) {
+        setError(errorMessage, QStringLiteral("Note could not be loaded for color update."));
+        return false;
+    }
+    Note note;
+    note.id = query.value(0).toInt();
+    note.title = query.value(1).toString();
+    note.body = query.value(2).toString();
+    note.color = color;
+    note.tags = query.value(4).toString();
+    note.updatedAt = query.value(5).toString();
+    note.archived = query.value(6).toBool();
+    return saveNote(note, errorMessage);
+}
+
+bool NoteRepository::canUndoNote(int noteId) const
+{
+    QSqlDatabase database = QSqlDatabase::database(m_connectionName);
+    QSqlQuery query(database);
+    query.prepare(QStringLiteral(
+        "SELECT EXISTS(SELECT 1 FROM note_history "
+        "WHERE note_id = :note_id AND revision < ("
+        "SELECT history_position FROM notes WHERE id = :note_id))"));
+    query.bindValue(QStringLiteral(":note_id"), noteId);
+    return query.exec() && query.next() && query.value(0).toBool();
+}
+
+bool NoteRepository::canRedoNote(int noteId) const
+{
+    QSqlDatabase database = QSqlDatabase::database(m_connectionName);
+    QSqlQuery query(database);
+    query.prepare(QStringLiteral(
+        "SELECT EXISTS(SELECT 1 FROM note_history "
+        "WHERE note_id = :note_id AND revision > ("
+        "SELECT history_position FROM notes WHERE id = :note_id))"));
+    query.bindValue(QStringLiteral(":note_id"), noteId);
+    return query.exec() && query.next() && query.value(0).toBool();
+}
+
+bool NoteRepository::undoNote(int noteId, Note *restoredNote, QString *errorMessage) const
+{
+    return restoreHistoryRevision(noteId, false, restoredNote, errorMessage);
+}
+
+bool NoteRepository::redoNote(int noteId, Note *restoredNote, QString *errorMessage) const
+{
+    return restoreHistoryRevision(noteId, true, restoredNote, errorMessage);
+}
+
+bool NoteRepository::restoreHistoryRevision(int noteId, bool redo, Note *restoredNote, QString *errorMessage) const
+{
+    if (restoredNote == nullptr) {
+        setError(errorMessage, QStringLiteral("Restored note output is null."));
+        return false;
+    }
+
+    QSqlDatabase database = QSqlDatabase::database(m_connectionName);
+    if (!database.transaction()) {
+        setError(errorMessage, database.lastError().text());
+        return false;
+    }
+
+    QSqlQuery positionQuery(database);
+    positionQuery.prepare(QStringLiteral("SELECT history_position, archived FROM notes WHERE id = :id"));
+    positionQuery.bindValue(QStringLiteral(":id"), noteId);
+    if (!execute(positionQuery, errorMessage) || !positionQuery.next()) {
+        database.rollback();
+        setError(errorMessage, QStringLiteral("Note history is unavailable."));
+        return false;
+    }
+    const int currentPosition = positionQuery.value(0).toInt();
+    const bool archived = positionQuery.value(1).toBool();
+
+    QSqlQuery revisionQuery(database);
+    revisionQuery.prepare(QStringLiteral(
+        "SELECT revision, title, body, color, tags FROM note_history "
+        "WHERE note_id = :note_id AND revision %1 :position "
+        "ORDER BY revision %2 LIMIT 1")
+            .arg(redo ? QStringLiteral(">") : QStringLiteral("<"),
+                 redo ? QStringLiteral("ASC") : QStringLiteral("DESC")));
+    revisionQuery.bindValue(QStringLiteral(":note_id"), noteId);
+    revisionQuery.bindValue(QStringLiteral(":position"), currentPosition);
+    if (!execute(revisionQuery, errorMessage) || !revisionQuery.next()) {
+        database.rollback();
+        setError(errorMessage, redo ? QStringLiteral("No newer revision is available.") : QStringLiteral("No older revision is available."));
+        return false;
+    }
+
+    const int revision = revisionQuery.value(0).toInt();
+    QSqlQuery updateQuery(database);
+    updateQuery.prepare(QStringLiteral(
+        "UPDATE notes SET title = :title, body = :body, color = :color, tags = :tags, "
+        "history_position = :position, updated_at = CURRENT_TIMESTAMP WHERE id = :id"));
+    updateQuery.bindValue(QStringLiteral(":title"), revisionQuery.value(1));
+    updateQuery.bindValue(QStringLiteral(":body"), revisionQuery.value(2));
+    updateQuery.bindValue(QStringLiteral(":color"), revisionQuery.value(3));
+    updateQuery.bindValue(QStringLiteral(":tags"), revisionQuery.value(4));
+    updateQuery.bindValue(QStringLiteral(":position"), revision);
+    updateQuery.bindValue(QStringLiteral(":id"), noteId);
+    if (!execute(updateQuery, errorMessage) || !database.commit()) {
+        if (errorMessage != nullptr && errorMessage->isEmpty()) {
+            *errorMessage = database.lastError().text();
+        }
+        database.rollback();
+        return false;
+    }
+
+    restoredNote->id = noteId;
+    restoredNote->title = revisionQuery.value(1).toString();
+    restoredNote->body = revisionQuery.value(2).toString();
+    restoredNote->color = revisionQuery.value(3).toString();
+    restoredNote->tags = revisionQuery.value(4).toString();
+    restoredNote->archived = archived;
+    return true;
 }
 
 bool NoteRepository::ensureSchema(QString *errorMessage) const
@@ -317,11 +544,26 @@ bool NoteRepository::ensureSchema(QString *errorMessage) const
         "color TEXT NOT NULL,"
         "tags TEXT NOT NULL DEFAULT '',"
         "archived INTEGER NOT NULL DEFAULT 0,"
+        "history_position INTEGER NOT NULL DEFAULT 0,"
         "sort_order INTEGER NOT NULL DEFAULT 0,"
         "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
         "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
         "deleted_at TEXT"
         ")"))) {
+        setError(errorMessage, query.lastError().text());
+        return false;
+    }
+
+    if (!query.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS note_history ("
+        "note_id INTEGER NOT NULL,"
+        "revision INTEGER NOT NULL,"
+        "title TEXT NOT NULL,"
+        "body TEXT NOT NULL,"
+        "color TEXT NOT NULL,"
+        "tags TEXT NOT NULL,"
+        "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        "PRIMARY KEY (note_id, revision))"))) {
         setError(errorMessage, query.lastError().text());
         return false;
     }
@@ -337,6 +579,10 @@ bool NoteRepository::ensureSchema(QString *errorMessage) const
         && ensureColumn(QStringLiteral("notes"),
                         QStringLiteral("deleted_at"),
                         QStringLiteral("deleted_at TEXT"),
+                        errorMessage)
+        && ensureColumn(QStringLiteral("notes"),
+                        QStringLiteral("history_position"),
+                        QStringLiteral("history_position INTEGER NOT NULL DEFAULT 0"),
                         errorMessage);
 }
 

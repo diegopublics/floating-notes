@@ -30,10 +30,15 @@ public:
     bool deleteNotePermanently(int noteId, QString *errorMessage = nullptr) const;
     bool saveNote(const Note &note, QString *errorMessage = nullptr) const;
     bool updateNoteColor(int noteId, const QString &color, QString *errorMessage = nullptr) const;
+    bool canUndoNote(int noteId) const;
+    bool canRedoNote(int noteId) const;
+    bool undoNote(int noteId, Note *restoredNote, QString *errorMessage = nullptr) const;
+    bool redoNote(int noteId, Note *restoredNote, QString *errorMessage = nullptr) const;
 
 private:
     bool ensureSchema(QString *errorMessage) const;
     bool ensureColumn(const QString &tableName, const QString &columnName, const QString &definition, QString *errorMessage) const;
+    bool restoreHistoryRevision(int noteId, bool redo, Note *restoredNote, QString *errorMessage) const;
     bool seedIfEmpty(QString *errorMessage) const;
     QString databasePath() const;
     void setError(QString *errorMessage, const QString &message) const;

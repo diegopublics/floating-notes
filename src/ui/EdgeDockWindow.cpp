@@ -1,6 +1,7 @@
 #include "EdgeDockWindow.h"
 
 #include "app/AppSettings.h"
+#include "MarkdownEditor.h"
 
 #include <QApplication>
 #include <QBoxLayout>
@@ -15,7 +16,6 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
-#include <QPlainTextEdit>
 #include <QPropertyAnimation>
 #include <QPushButton>
 #include <QScreen>
@@ -302,6 +302,14 @@ void EdgeDockWindow::buildContent()
     m_titleEdit = new QLineEdit(m_editorPanel); m_titleEdit->setPlaceholderText(QStringLiteral("New note"));
     connect(m_titleEdit, &QLineEdit::textChanged, this, &EdgeDockWindow::scheduleSave); header->addWidget(m_titleEdit, 1);
     m_statusLabel = new QLabel(m_editorPanel); m_statusLabel->setMinimumWidth(88); m_statusLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter); header->addWidget(m_statusLabel);
+    m_historyUndoButton = new QPushButton(QStringLiteral("Undo"), m_editorPanel);
+    m_historyUndoButton->setToolTip(QStringLiteral("Restore the previous saved version"));
+    connect(m_historyUndoButton, &QPushButton::clicked, this, &EdgeDockWindow::undoCurrentNote);
+    header->addWidget(m_historyUndoButton);
+    m_historyRedoButton = new QPushButton(QStringLiteral("Redo"), m_editorPanel);
+    m_historyRedoButton->setToolTip(QStringLiteral("Restore the next saved version"));
+    connect(m_historyRedoButton, &QPushButton::clicked, this, &EdgeDockWindow::redoCurrentNote);
+    header->addWidget(m_historyRedoButton);
     m_pinButton = new QPushButton(QStringLiteral("Pin"), m_editorPanel);
     m_pinButton->setCheckable(true);
     m_pinButton->setToolTip(QStringLiteral("Keep this note open"));
@@ -320,9 +328,9 @@ void EdgeDockWindow::buildContent()
     connect(m_allNotesButton, &QPushButton::clicked, this, [this] { if (m_allNotesCallback) m_allNotesCallback(); }); header->addWidget(m_allNotesButton);
     layout->addLayout(header);
     m_tagsEdit = new QLineEdit(m_editorPanel); m_tagsEdit->hide(); connect(m_tagsEdit, &QLineEdit::textChanged, this, &EdgeDockWindow::scheduleSave);
-    m_bodyEdit = new QPlainTextEdit(m_editorPanel); m_bodyEdit->setPlaceholderText(QStringLiteral("Write a note...")); m_bodyEdit->setTabChangesFocus(true);
-    connect(m_bodyEdit, &QPlainTextEdit::textChanged, this, &EdgeDockWindow::scheduleSave); layout->addWidget(m_bodyEdit, 1);
-    connect(m_bodyEdit, &QPlainTextEdit::cursorPositionChanged, this, [this] {
+    m_bodyEdit = new MarkdownEditor(m_editorPanel); m_bodyEdit->setPlaceholderText(QStringLiteral("Write a note..."));
+    connect(m_bodyEdit, &MarkdownEditor::textChanged, this, &EdgeDockWindow::scheduleSave); layout->addWidget(m_bodyEdit, 1);
+    connect(m_bodyEdit, &MarkdownEditor::cursorPositionChanged, this, [this] {
         if (!m_loadingEditor && m_currentNoteIndex >= 0 && m_currentNoteIndex < m_notes.size()) {
             m_bodyCursorPositions.insert(m_notes.at(m_currentNoteIndex).id, m_bodyEdit->textCursor().position());
         }
@@ -345,7 +353,7 @@ void EdgeDockWindow::applySettings()
     m_geometryAnimation->setDuration(m_settings->animationDurationMs());
     m_titleEdit->setFont(noteFont(m_settings->noteFont(), 13, QFont::DemiBold));
     m_tagsEdit->setFont(noteFont(m_settings->noteFont(), 9));
-    m_bodyEdit->setFont(noteFont(m_settings->noteFont(), m_settings->noteBodyFontSize()));
+    m_bodyEdit->setEditorFont(noteFont(m_settings->noteFont(), m_settings->noteBodyFontSize()));
     updateNoteButtons(); layoutDeck(); positionNearScreenEdge();
 }
 
@@ -398,7 +406,7 @@ void EdgeDockWindow::openNote(int noteId)
     setExpanded(true);
     updateEditorFromCurrentNote();
     updateColorButtons();
-    m_bodyEdit->setFocus(Qt::MouseFocusReason);
+    m_bodyEdit->focusEditor(Qt::MouseFocusReason);
 }
 
 bool EdgeDockWindow::isEditingNote(int noteId) const
@@ -602,7 +610,7 @@ void EdgeDockWindow::createNoteAndFocus()
         }
         return;
     }
-    setExpanded(true); setEditorVisible(true); updateEditorFromCurrentNote(); m_bodyEdit->setFocus(Qt::MouseFocusReason);
+    setExpanded(true); setEditorVisible(true); updateEditorFromCurrentNote(); m_bodyEdit->focusEditor(Qt::MouseFocusReason);
 }
 void EdgeDockWindow::archiveSelectedNote()
 {
@@ -627,6 +635,28 @@ void EdgeDockWindow::undoDelete()
     if (!m_repository->restoreDeletedNote(id, &errorMessage)) { setStatusText(QStringLiteral("Undo error: %1").arg(errorMessage)); return; } refreshNotes();
     if (m_notesChangedCallback) m_notesChangedCallback();
 }
+void EdgeDockWindow::undoCurrentNote()
+{
+    if (m_currentNoteIndex < 0 || m_currentNoteIndex >= m_notes.size()) return;
+    m_saveTimer->stop(); saveCurrentNote();
+    Note restoredNote; QString errorMessage;
+    if (!m_repository->undoNote(m_notes.at(m_currentNoteIndex).id, &restoredNote, &errorMessage)) { setStatusText(QStringLiteral("Undo error: %1").arg(errorMessage)); return; }
+    m_notes[m_currentNoteIndex] = restoredNote;
+    updateEditorFromCurrentNote(); updateNoteButtons(); updateColorButtons();
+    setStatusText(QStringLiteral("Previous version restored"));
+    if (m_notesChangedCallback) m_notesChangedCallback();
+}
+void EdgeDockWindow::redoCurrentNote()
+{
+    if (m_currentNoteIndex < 0 || m_currentNoteIndex >= m_notes.size()) return;
+    m_saveTimer->stop(); saveCurrentNote();
+    Note restoredNote; QString errorMessage;
+    if (!m_repository->redoNote(m_notes.at(m_currentNoteIndex).id, &restoredNote, &errorMessage)) { setStatusText(QStringLiteral("Redo error: %1").arg(errorMessage)); return; }
+    m_notes[m_currentNoteIndex] = restoredNote;
+    updateEditorFromCurrentNote(); updateNoteButtons(); updateColorButtons();
+    setStatusText(QStringLiteral("Next version restored"));
+    if (m_notesChangedCallback) m_notesChangedCallback();
+}
 void EdgeDockWindow::finalizePendingDelete()
 {
     if (m_pendingDeleteNoteId == 0) return;
@@ -635,7 +665,7 @@ void EdgeDockWindow::finalizePendingDelete()
 void EdgeDockWindow::insertChecklistLine()
 {
     if (m_currentNoteIndex < 0 || m_currentNoteIndex >= m_notes.size()) return;
-    QTextCursor cursor = m_bodyEdit->textCursor(); cursor.insertText(QStringLiteral("- [ ] ")); m_bodyEdit->setTextCursor(cursor); m_bodyEdit->setFocus(Qt::ShortcutFocusReason); scheduleSave();
+    m_bodyEdit->insertChecklistItem(); scheduleSave();
 }
 void EdgeDockWindow::scheduleSave()
 {
@@ -645,10 +675,10 @@ void EdgeDockWindow::saveCurrentNoteNow() { saveCurrentNote(); }
 void EdgeDockWindow::saveCurrentNote()
 {
     if (m_currentNoteIndex < 0 || m_currentNoteIndex >= m_notes.size()) return;
-    Note &note = m_notes[m_currentNoteIndex]; note.title = m_titleEdit->text().trimmed(); if (note.title.isEmpty()) note.title = QStringLiteral("Untitled"); note.tags = m_tagsEdit->text().trimmed(); note.body = m_bodyEdit->toPlainText();
+    Note &note = m_notes[m_currentNoteIndex]; note.title = m_titleEdit->text().trimmed(); if (note.title.isEmpty()) note.title = QStringLiteral("Untitled"); note.tags = m_tagsEdit->text().trimmed(); note.body = m_bodyEdit->storage();
     m_settings->setNoteBodyCursorPosition(note.id, m_bodyEdit->textCursor().position());
     QString errorMessage;
-    if (m_repository->saveNote(note, &errorMessage)) { setStatusText(QStringLiteral("Saved · just now")); updateNoteButtons(); } else setStatusText(QStringLiteral("Save error: %1").arg(errorMessage));
+    if (m_repository->saveNote(note, &errorMessage)) { setStatusText(QStringLiteral("Saved · just now")); updateNoteButtons(); updateHistoryButtons(); } else setStatusText(QStringLiteral("Save error: %1").arg(errorMessage));
 }
 void EdgeDockWindow::scheduleCollapse() { if (m_expanded && !m_keepOpen) m_collapseTimer->start(); }
 void EdgeDockWindow::setExpanded(bool expanded)
@@ -726,6 +756,12 @@ void EdgeDockWindow::updateColorButtons()
         button->setStyleSheet(QStringLiteral("QPushButton { background: %1; border: %2px solid %3; border-radius: 9px; padding: 0; } QPushButton:hover { border-color: #38252d; }").arg(color).arg(color == selected ? 3 : 0).arg(color == selected ? QStringLiteral("#6d3d55") : QStringLiteral("transparent")));
     }
 }
+void EdgeDockWindow::updateHistoryButtons()
+{
+    const bool hasNote = m_currentNoteIndex >= 0 && m_currentNoteIndex < m_notes.size();
+    m_historyUndoButton->setEnabled(hasNote && m_repository->canUndoNote(m_notes.at(m_currentNoteIndex).id));
+    m_historyRedoButton->setEnabled(hasNote && m_repository->canRedoNote(m_notes.at(m_currentNoteIndex).id));
+}
 void EdgeDockWindow::updateContentVisibility()
 {
     const bool showFan = m_expanded && !m_editorVisible;
@@ -738,15 +774,16 @@ void EdgeDockWindow::updateEditorFromCurrentNote()
     for (QWidget *widget : {static_cast<QWidget *>(m_titleEdit), static_cast<QWidget *>(m_bodyEdit), static_cast<QWidget *>(m_archiveButton), static_cast<QWidget *>(m_deleteButton), static_cast<QWidget *>(m_checklistButton), static_cast<QWidget *>(m_pinButton)}) widget->setEnabled(hasNote);
     for (QPushButton *button : m_colorButtons) button->setEnabled(hasNote);
     if (hasNote) {
-        const Note &note = m_notes.at(m_currentNoteIndex); m_titleEdit->setText(note.title); m_tagsEdit->setText(note.tags); m_bodyEdit->setPlainText(note.body);
+        const Note &note = m_notes.at(m_currentNoteIndex); m_titleEdit->setText(note.title); m_tagsEdit->setText(note.tags); m_bodyEdit->setMarkdown(note.body);
         QTextCursor cursor = m_bodyEdit->textCursor();
-        cursor.setPosition(std::clamp(m_bodyCursorPositions.value(note.id, m_settings->noteBodyCursorPosition(note.id)), 0, static_cast<int>(note.body.size())));
+        cursor.setPosition(std::clamp(m_bodyCursorPositions.value(note.id, m_settings->noteBodyCursorPosition(note.id)), 0, m_bodyEdit->characterCount() - 1));
         m_bodyEdit->setTextCursor(cursor);
         const QColor ink = inkColor(paperColor(note.color));
-        m_editorPanel->setStyleSheet(QStringLiteral("QLineEdit, QPlainTextEdit { background: transparent; border: 0; color: %1; selection-background-color: rgba(74,45,57,185); selection-color: #fff8f1; } QLineEdit { padding: 2px 0; } QPlainTextEdit { padding: 9px 8px; } QLabel { color: rgba(%2,%3,%4,130); font-size: 10px; } QPushButton { background: rgba(61,36,47,22); border: 0; border-radius: 6px; color: %1; padding: 3px 9px; font-size: 11px; } QPushButton:hover { background: rgba(61,36,47,42); }").arg(ink.name()).arg(ink.red()).arg(ink.green()).arg(ink.blue()));
+        m_editorPanel->setStyleSheet(QStringLiteral("QLineEdit, QPlainTextEdit, QTextEdit { background: transparent; border: 0; color: %1; selection-background-color: rgba(74,45,57,185); selection-color: #fff8f1; } QLineEdit { padding: 2px 0; } QPlainTextEdit, QTextEdit { padding: 9px 8px; } QFrame#markdownToolbar { background: rgba(61,36,47,16); border-bottom: 1px solid rgba(61,36,47,38); } QToolButton { background: transparent; border: 0; border-radius: 4px; color: %1; padding: 1px; font-size: 10px; } QToolButton:hover, QToolButton:checked { background: rgba(61,36,47,48); } QLabel { color: rgba(%2,%3,%4,130); font-size: 10px; } QPushButton { background: rgba(61,36,47,22); border: 0; border-radius: 6px; color: %1; padding: 3px 9px; font-size: 11px; } QPushButton:hover { background: rgba(61,36,47,42); }").arg(ink.name()).arg(ink.red()).arg(ink.green()).arg(ink.blue()));
         setStatusText(QStringLiteral("Saved · just now"));
-    } else { m_titleEdit->clear(); m_tagsEdit->clear(); m_bodyEdit->clear(); }
+    } else { m_titleEdit->clear(); m_tagsEdit->clear(); m_bodyEdit->setMarkdown({}); }
     m_loadingEditor = false;
+    updateHistoryButtons();
 }
 void EdgeDockWindow::updateNoteButtons()
 {

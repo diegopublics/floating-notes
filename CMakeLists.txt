@@ -22,6 +22,8 @@ qt_add_executable(FloatingNotes
     src/app/ImportExport.h
     src/core/Note.cpp
     src/core/Note.h
+    src/core/NoteBodyFormat.cpp
+    src/core/NoteBodyFormat.h
     src/platform/GlobalHotkeys.cpp
     src/platform/GlobalHotkeys.h
     src/platform/StartupIntegration.cpp
@@ -40,6 +42,8 @@ qt_add_executable(FloatingNotes
     src/ui/EdgeDockWindow.h
     src/ui/HelpDialog.cpp
     src/ui/HelpDialog.h
+    src/ui/MarkdownEditor.cpp
+    src/ui/MarkdownEditor.h
     src/ui/SettingsDialog.cpp
     src/ui/SettingsDialog.h
 )
