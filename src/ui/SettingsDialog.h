@@ -30,6 +30,7 @@ private:
     std::function<void()> m_settingsChangedCallback;
     QComboBox *m_languageCombo = nullptr;
     QComboBox *m_edgeCombo = nullptr;
+    QCheckBox *m_alwaysOnTopCheck = nullptr;
     QSpinBox *m_maxVisibleSpin = nullptr;
     QSpinBox *m_animationSpin = nullptr;
     QComboBox *m_themeCombo = nullptr;

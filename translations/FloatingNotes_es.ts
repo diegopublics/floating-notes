@@ -552,6 +552,11 @@
       <translation>Borde</translation>
     </message>
     <message>
+      <location filename="../src/ui/SettingsDialog.cpp" line="49" />
+      <source>Always on top</source>
+      <translation>Siempre encima</translation>
+    </message>
+    <message>
       <location filename="../src/ui/SettingsDialog.cpp" line="50" />
       <source>Visible notes</source>
       <translation>Notas visibles</translation>

@@ -21,7 +21,7 @@ SettingsDialog::SettingsDialog(AppSettings *settings,
     , m_settingsChangedCallback(std::move(settingsChangedCallback))
 {
     setWindowTitle(tr("Settings"));
-    resize(390, 410);
+    resize(390, 440);
     buildUi();
     loadSettings();
 }
@@ -44,6 +44,9 @@ void SettingsDialog::buildUi()
     m_edgeCombo->addItem(tr("Right"), static_cast<int>(AppSettings::Edge::Right));
     m_edgeCombo->addItem(tr("Left"), static_cast<int>(AppSettings::Edge::Left));
     formLayout->addRow(tr("Edge"), m_edgeCombo);
+
+    m_alwaysOnTopCheck = new QCheckBox(tr("Always on top"), this);
+    formLayout->addRow(QString(), m_alwaysOnTopCheck);
 
     m_maxVisibleSpin = new QSpinBox(this);
     m_maxVisibleSpin->setRange(1, 8);
@@ -105,6 +108,7 @@ void SettingsDialog::loadSettings()
 {
     m_languageCombo->setCurrentIndex(m_languageCombo->findData(static_cast<int>(m_settings->language())));
     m_edgeCombo->setCurrentIndex(m_edgeCombo->findData(static_cast<int>(m_settings->preferredEdge())));
+    m_alwaysOnTopCheck->setChecked(m_settings->alwaysOnTop());
     m_maxVisibleSpin->setValue(m_settings->maxVisibleNotes());
     m_animationSpin->setValue(m_settings->animationDurationMs());
     m_themeCombo->setCurrentIndex(m_themeCombo->findData(static_cast<int>(m_settings->theme())));
@@ -122,6 +126,7 @@ void SettingsDialog::applySettings()
     const AppSettings::Language selectedLanguage = static_cast<AppSettings::Language>(m_languageCombo->currentData().toInt());
     m_settings->setLanguage(selectedLanguage);
     m_settings->setPreferredEdge(static_cast<AppSettings::Edge>(m_edgeCombo->currentData().toInt()));
+    m_settings->setAlwaysOnTop(m_alwaysOnTopCheck->isChecked());
     m_settings->setMaxVisibleNotes(m_maxVisibleSpin->value());
     m_settings->setAnimationDurationMs(m_animationSpin->value());
     m_settings->setTheme(static_cast<AppSettings::Theme>(m_themeCombo->currentData().toInt()));

@@ -38,6 +38,9 @@ public:
     Edge preferredEdge() const;
     void setPreferredEdge(Edge edge);
 
+    bool alwaysOnTop() const;
+    void setAlwaysOnTop(bool enabled);
+
     int maxVisibleNotes() const;
     void setMaxVisibleNotes(int count);
 

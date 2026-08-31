@@ -376,6 +376,15 @@ void EdgeDockWindow::buildContent()
 
 void EdgeDockWindow::applySettings()
 {
+    const bool alwaysOnTop = !m_editorOnly || m_settings->alwaysOnTop();
+    if (windowFlags().testFlag(Qt::WindowStaysOnTopHint) != alwaysOnTop) {
+        const bool wasVisible = isVisible();
+        setWindowFlag(Qt::WindowStaysOnTopHint, alwaysOnTop);
+        if (wasVisible) {
+            show();
+        }
+    }
+
     m_geometryAnimation->setDuration(m_settings->animationDurationMs());
     m_titleEdit->setFont(noteFont(m_settings->noteFont(), 13, QFont::DemiBold));
     m_tagsEdit->setFont(noteFont(m_settings->noteFont(), 9));
@@ -405,6 +414,7 @@ void EdgeDockWindow::refreshNotes()
 void EdgeDockWindow::setEditorOnly(bool editorOnly)
 {
     m_editorOnly = editorOnly;
+    applySettings();
 }
 
 void EdgeDockWindow::setOpenNoteCallback(std::function<void(int)> callback)

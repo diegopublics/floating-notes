@@ -123,6 +123,16 @@ void AppSettings::setPreferredEdge(Edge edge)
     QSettings().setValue(QStringLiteral("general/preferredEdge"), edgeToString(edge));
 }
 
+bool AppSettings::alwaysOnTop() const
+{
+    return QSettings().value(QStringLiteral("general/alwaysOnTop"), true).toBool();
+}
+
+void AppSettings::setAlwaysOnTop(bool enabled)
+{
+    QSettings().setValue(QStringLiteral("general/alwaysOnTop"), enabled);
+}
+
 int AppSettings::maxVisibleNotes() const
 {
     return QSettings().value(QStringLiteral("general/maxVisibleNotes"), DefaultMaxVisibleNotes).toInt();
